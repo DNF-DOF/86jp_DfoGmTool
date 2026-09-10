@@ -31,6 +31,11 @@ foreach ($required in @($serverSchema, $serverMigrations, $serverEquipmentType, 
 }
 
 $utf8NoBom = [Text.UTF8Encoding]::new($false)
+$encodingSource = Join-Path $ServerRoot 'Server\DfoServer\Infrastructure\ClientTextEncoding.cs'
+$encodingTarget = Join-Path $PSScriptRoot 'ServerCore\Infrastructure\ClientTextEncoding.cs'
+$encodingContent = [IO.File]::ReadAllText($encodingSource, [Text.Encoding]::UTF8).Replace(
+  'namespace DfoServer.Infrastructure', 'namespace DfoGmTool.ServerCore.Infrastructure')
+[IO.File]::WriteAllText($encodingTarget, ($encodingContent -replace "`r`n", "`n"), $utf8NoBom)
 $equipmentTypeContent = [IO.File]::ReadAllText($serverEquipmentType, [Text.Encoding]::UTF8)
 $equipmentTypeContent = $equipmentTypeContent.Replace(
   'namespace DfoServer.Game.ItemUpgrade',
@@ -135,6 +140,13 @@ if ($schemaMatches.Count -eq 0) {
   throw 'Could not read the A21 schema version from SqliteMigrations.cs.'
 }
 $schemaVersion = [int](($schemaMatches | ForEach-Object { [int]$_.Groups[1].Value } | Measure-Object -Maximum).Maximum)
+$migrationTarget = Join-Path $PSScriptRoot 'ServerCore\Game\Inventory\A12ToA21MigrationService.cs'
+$migrationContent = [IO.File]::ReadAllText($migrationTarget, [Text.Encoding]::UTF8)
+if ([regex]::Matches($migrationContent, 'public const int TargetSchemaVersion = \d+;').Count -ne 1) {
+  throw 'Could not locate the unique GM migration target schema version.'
+}
+$migrationContent = [regex]::Replace($migrationContent, 'public const int TargetSchemaVersion = \d+;', "public const int TargetSchemaVersion = $schemaVersion;")
+[IO.File]::WriteAllText($migrationTarget, ($migrationContent -replace "`r`n", "`n"), $utf8NoBom)
 $baselineId = $baselineMatch.Groups[1].Value
 
 $pvfHashes = [ordered]@{}
@@ -146,6 +158,10 @@ $manifest = [ordered]@{
   baselineId = $baselineId
   schemaVersion = $schemaVersion
   schemaSha256 = (Get-FileHash $targetSchema -Algorithm SHA256).Hash.ToLowerInvariant()
+  clientTextEncodingSourceFile = [ordered]@{
+    path = 'ServerCore/Infrastructure/ClientTextEncoding.cs'
+    sha256 = (Get-FileHash $encodingTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
   equipmentTypeSourceFile = [ordered]@{
     path = 'ServerCore/Game/ItemUpgrade/EquipmentType.cs'
     sha256 = (Get-FileHash $targetEquipmentType -Algorithm SHA256).Hash.ToLowerInvariant()

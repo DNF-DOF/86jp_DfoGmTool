@@ -75,9 +75,21 @@
           <span id="runtime-source-state" class="hint" aria-live="polite"></span>
         </div>
 
+        <details id="client-text-migration" class="a12-a21-migration">
+          <summary>旧数据库 UTF-8 → GBK 编码转换</summary>
+          <p class="migration-warning">加载前自动检查角色名、宠物名及邮件附件名字节。邮件标题和正文保留 Unicode。请先停止服务端；执行时自动备份并在事务内转换，不修改 schema 版本。</p>
+          <p class="hint">请选择每一项中显示正常、符合原名的文字。若 UTF-8 一项显示正常，就选 UTF-8，工具会自动转换为 GBK；若 GBK 一项显示正常，就选 GBK，工具会保留原内容。若两项都乱码，请先取消处理并核对原名。</p>
+          <label><input id="client-text-stopped" type="checkbox">服务端已停止</label>
+          <div id="client-text-choices"></div>
+          <div class="runtime-source-actions">
+            <button id="client-text-preview-button" class="mini" type="button">预览编码</button>
+            <button id="client-text-execute-button" class="mini danger" type="button" disabled>确认处理并加载</button>
+          </div>
+          <pre id="client-text-report" class="migration-report" style="white-space:pre-wrap;max-height:320px;overflow:auto" aria-live="polite"></pre>
+        </details>
         <details id="a12-a21-migration" class="a12-a21-migration" aria-labelledby="a12-a21-migration-title">
           <summary class="runtime-source-title-row"><span id="a12-a21-migration-title">S4A12 → S4A21 数据迁移</span></summary>
-          <p class="migration-warning">此操作会把上方数据库路径中的 S4A12 原文件升级为 S4A21 schema-v8，并替换原文件。请先自行备份数据库、停止游戏服务端并确保没有在线角色；预览零写入，无法安全转换的数据会跳过并写入报告。</p>
+          <p class="migration-warning">此操作会把上方数据库路径中的 S4A12 原文件升级为 S4A21 当前结构，并替换原文件。请先自行备份数据库、停止游戏服务端并确保没有在线角色；预览零写入，无法安全转换的数据会跳过并写入报告。</p>
           <label class="migration-backup-check">
             <input id="a12-a21-user-backed-up" type="checkbox">
             我已自行备份数据库，并确认服务端已停止、没有在线角色
@@ -185,7 +197,7 @@
           <div class="card-title">账号备份</div>
           <div class="row">
             <button id="btn-export-account-backup" class="mini">导出当前账号</button>
-            <span class="hint">v2 备份包含角色、背包、任务、普通/PVP 技能、称号簿、金库、邮箱待领取附件与系统邮件审计；旧 v1 会在恢复前安全升级。</span>
+            <span class="hint">v4 备份包含角色、背包、任务、技能、称号簿、金库、邮箱及好友关系，名字节为 GBK；恢复旧 v3 时转换 UTF-8 名字节。v1/v2 不支持直接恢复。</span>
           </div>
           <div class="row">
             <input id="account-backup-file" type="file" accept="application/json,.json">
@@ -344,6 +356,35 @@
             </div>
           </div>
           <div class="character-card-grid character-card-grid-two">
+          <div class="card">
+            <div class="card-title">副职业</div>
+            <div class="row">
+              <label>职业 <select id="profession-type" disabled></select></label>
+              <label>等级 <select id="profession-level" disabled></select></label>
+              <button id="btn-profession-save" disabled>保存副职业</button>
+            </div>
+            <p id="profession-state" class="hint" aria-live="polite">请选择角色</p>
+            <div id="profession-machine" class="hidden">
+              <div class="row">
+                <label>分解机等级 <select id="profession-machine-level" disabled></select></label>
+                <button id="btn-profession-machine-save" disabled>保存分解机等级</button>
+              </div>
+              <p id="profession-machine-state" class="hint" aria-live="polite"></p>
+              <p class="hint">可选等级需满足角色和副职业等级要求。修改等级时恢复该等级的满耐久，不扣金币；重新选择角色后生效。</p>
+            </div>
+            <p class="hint">选择等级后，工具自动匹配对应经验。切换职业会完成所选职业任务链、释放其他职业任务，并同步技能与配方。角色需退出游戏或切换到其他角色后修改。</p>
+          </div>
+          <div class="card">
+            <div class="card-title">决斗等级</div>
+            <div class="row">
+              <label>决斗等级 <select id="duel-grade" disabled></select></label>
+              <button id="btn-duel-save" disabled>保存决斗等级</button>
+            </div>
+            <p id="duel-state" class="hint" aria-live="polite"></p>
+            <p class="hint">选择等级名称后保存，不联动经验。胜点请在角色货币页面修改。</p>
+          </div>
+          </div>
+          <div class="character-card-grid character-card-grid-two">
           <div class="card character-action-card">
             <div class="card-title">复制角色</div>
             <div class="row">
@@ -367,11 +408,12 @@
               <span id="clone-account-limit" class="hint"></span>
             </div>
             <div class="row">
-              <label>新角色名 <input id="clone-character-name" type="text" autocomplete="off"></label>
+              <label>新角色名 <input id="clone-character-name" type="text" maxlength="12" autocomplete="off" placeholder="最多6个中文或12个半角字符"></label>
               <button id="btn-check-clone-name" class="mini" type="button">检查重名</button>
               <span id="clone-name-state" class="hint"></span>
             </div>
             <div id="clone-option-list" class="clone-option-list"></div>
+            <p class="hint">名字最多 6 个中文（全角）或 12 个字母、数字（半角）；混合输入时，全角占 2 字节，总计不超过 12 字节。</p>
             <div class="row">
               <button id="btn-run-character-clone">开始复制</button>
               <button id="btn-cancel-character-clone" class="mini" type="button">关闭</button>

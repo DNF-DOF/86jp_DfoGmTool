@@ -17,6 +17,8 @@ namespace DfoGmTool.Services
             public int Id;
             public string Name;
             public string Grade;      // epic/normal/daily/... (去壳)
+            public string Type;
+            public string IntData;
             public int MinLevel;
             public int MaxLevel;
             public int[] PreRequired;     // 所有前置组的并集(反向索引/展示回退用)
@@ -293,6 +295,8 @@ namespace DfoGmTool.Services
                         Id = entries[i].Key,
                         Name = model.Name,
                         Grade = NormalizeGrade(model.Grade),
+                        Type = (model.Type ?? "").Replace("`", "").Trim().Trim('[', ']').Trim().ToLowerInvariant(),
+                        IntData = model.IntData,
                         MinLevel = model.Level != null && model.Level.Length > 0 ? model.Level[0] : 0,
                         MaxLevel = model.Level != null && model.Level.Length > 1 ? model.Level[1] : 99,
                         PreRequired = preRequired.ToArray(),

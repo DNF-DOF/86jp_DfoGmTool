@@ -1,11 +1,15 @@
 {
-    "serverCommit":  "f6a0318c908bd11ee578bf0fb32f0ae82d5ad1ea",
+    "serverCommit":  "c58cd2b479b0357cb6ca78887c9d638b080f4638",
     "baselineId":  "86jp-database-v1",
-    "schemaVersion":  8,
-    "schemaSha256":  "c508e095d1d4867f49087f4fbfaa28e7a3e2f65900c806727ef0e7229a0fe6a3",
+    "schemaVersion":  26,
+    "schemaSha256":  "f9645c4dda6bc43d7267b5d3dece15bfed3cb9c7aec8e4604402ed1f17513b64",
+    "clientTextEncodingSourceFile":  {
+                                         "path":  "ServerCore/Infrastructure/ClientTextEncoding.cs",
+                                         "sha256":  "8f1f8df4339c1e3f4ed9d53559aa6b673ea917d238ea0aafda82c793bfd42818"
+                                     },
     "equipmentTypeSourceFile":  {
                                     "path":  "ServerCore/Game/ItemUpgrade/EquipmentType.cs",
-                                    "sha256":  "e10b31091fbe497ce521a6795a5c8bcea8b40a25133ac6e2f7abb9852dad8198"
+                                    "sha256":  "76395ca957a8c8ac449c91b337da0c5592105b7c09b3ae3c99ffa11f34b940d6"
                                 },
     "compatibilityPatches":  [
                                  "ServerCore/Game/Quests/QuestRepository.cs: retain GM quest_id 1..29999 and completion_value 1..255 guards"
@@ -31,16 +35,17 @@
                            "Models\\CreatureFile.cs":  "4a3756b45c888e9f931d009f6f6bc81a407de15d402278867148f651d7368459",
                            "Models\\DisjointFile.cs":  "92353db75823432f01e80a68c3bd7af859fb7e787b9f4facca5aaf4484092539",
                            "Models\\DungeonFile.cs":  "118c215ed99fea84966e4401a665922213ebd7dd0bd318f1c0932c346633a41a",
-                           "Models\\EquipmentFile.cs":  "05ee335735ee177eb315112b5ac6ca171ec965c83cfed3a5f03e70fa92179056",
+                           "Models\\EquipmentFile.cs":  "70f75f397afe3d3b6e3d118329d83876ad2a45aa70c4021313194e10760753ea",
                            "Models\\EvtFile.cs":  "1feec297c66e601e411333dc575309788ae6b3b6d9b2665e41c19fd24a965061",
                            "Models\\ItemShopFile.cs":  "a00224078b44ee81c4531d8616fbc0cefceff3b43301b5ec0da044698e5524d9",
                            "Models\\KeyFile.cs":  "dd9d5cf51c5c95ce72f61acee2259c3d7034aa7ee0cac18d7dd856f568357ba8",
+                           "Models\\LicenseDungeonInfoFile.cs":  "cb7dcfee4215ffb65354b84e2609139e170a9b16565728528519924b1dbd4060",
                            "Models\\LstFile.cs":  "e28ad6e2fbed57428339bf657522c96d147ca388545021d870ec61738c836aee",
-                           "Models\\MapFile.cs":  "ccce75493c73ba3998c0193dfe13c81b84f6ae120a65fa19100f61b5f221216e",
+                           "Models\\MapFile.cs":  "9a6bc2effe2d0ea20e258786cc2b2e41632c11fcd1657f11bdb9789dd3dd721e",
                            "Models\\MissionFile.cs":  "00c6e23eb25438e98a304117714e97113c6b3cb88dccbae392f219283d03f794",
-                           "Models\\MonsterFile.cs":  "ce4050081868d3b9e9ed64aa69cf491a24e676489cc9c32e6307a3241b12db72",
+                           "Models\\MonsterFile.cs":  "e2f1e29fbec08dbeef8a8d7d6ad1ecff944be855fb71f43edc464d4dc675b31b",
                            "Models\\NpcFile.cs":  "04d9252183cba13ce6518360221b3b376d862d5c28a401e8139dd7ff1d60f70d",
-                           "Models\\ObjectFile.cs":  "f68d66733fd26c745afe75ebb028cc574fd650a06567248f4598246abe2ab719",
+                           "Models\\ObjectFile.cs":  "06f2d56a1575b212ab8f79049cdd6590b71be3b045de6e5c0dbc36b3b518f2fc",
                            "Models\\ParticleFile.cs":  "a0b2d51bcab233f4ef067bb8ad5c4f84ab9fe7a6123bec15a2884210ac08a5ea",
                            "Models\\PvfFileData.cs":  "1b2ed6f55d851fdfc2552888bff0d5c0ac6ca776b0f018bfecdd291484591ea0",
                            "Models\\PvfHashTable.cs":  "9796e4c6c87fd5c8a06886127134b84f95588e7de56f7663a9d7e9b9022e07bb",
@@ -52,8 +57,8 @@
                            "Models\\RaidBuffFile.cs":  "1c4285a47aae42f5a32d906308db1d343dc510747f0d5782f8e7ec0163614e75",
                            "Models\\RaidEtcFile.cs":  "5d2838d13285cd713388f583a0d4aed9cd124549c29ea95e7cacc37f12a127d8",
                            "Models\\ScriptNode.cs":  "c354fa05be63dda7da35273ff9f34d7ce3583445c6664dc666926bcab4719972",
-                           "Models\\SkillFile.cs":  "fc336cae05d4eb56b35f6221426cf43bf80201fe01b64b647260968841973e07",
-                           "Models\\StackableItemFile.cs":  "c8a6e48eca7f578841b706c5f535088a95b706fdee2ed210a15b4d8f8c4021b7",
+                           "Models\\SkillFile.cs":  "5e91a9fbaded64db046ea000c9a43b2a102e60e8ce213bba9d75108d4fccf67e",
+                           "Models\\StackableItemFile.cs":  "8748e81d2a08bef86a792aea7bdeb366736cc944853d64be20d5b2a8abb09f47",
                            "Models\\TableFile.cs":  "9d5e0235aff08458f24443c1947ed7b5dfee110bd911e1cf67ca81b04522c549",
                            "Models\\TitleChangeTableFile.cs":  "37dce93482a14f8949be4137bd758e350ec0b6920da561682e97a0a047223059",
                            "Models\\TownFile.cs":  "88b6bc767c88b493ded91ba2ebad1fb06efe28dc88762a1f9bd375ed43f1781e",

@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using DfoGmTool.ServerCore.Game.Inventory;
+using DfoGmTool.ServerCore.Infrastructure;
 using Microsoft.Data.Sqlite;
 
 namespace DfoGmTool.Services
@@ -23,7 +24,7 @@ namespace DfoGmTool.Services
             new CharacterCloneOption("titlebook", "称号簿/成就", true),
             new CharacterCloneOption("dungeon", "地图难度/副本状态", true),
             new CharacterCloneOption("daily", "每日/周常状态", true),
-            new CharacterCloneOption("wallet", "角色金币/复活币/技能点货币行", true),
+            new CharacterCloneOption("wallet", "角色金币/复活币/胜点货币行", true),
             new CharacterCloneOption("quickSlots", "快捷栏", true),
             new CharacterCloneOption("mainEquipment", "装备背包", true),
             new CharacterCloneOption("consumables", "消耗品背包", true),
@@ -127,7 +128,7 @@ FROM characters
 WHERE delete_flag = 0
   AND (name = @name OR name = @nameBytes OR name_bytes = @nameBytes);";
                 cmd.Parameters.AddWithValue("@name", normalized);
-                cmd.Parameters.AddWithValue("@nameBytes", Encoding.UTF8.GetBytes(normalized));
+                cmd.Parameters.AddWithValue("@nameBytes", ClientTextEncoding.GetBytes(normalized));
                 var exists = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
                 return new { success = true, available = !exists, reason = exists ? "角色名已存在" : "" };
             }
@@ -315,9 +316,9 @@ SELECT last_insert_rowid();";
                     if (column.Equals("account_id", StringComparison.OrdinalIgnoreCase))
                         value = targetAccountId;
                     else if (column.Equals("name", StringComparison.OrdinalIgnoreCase))
-                        value = Encoding.UTF8.GetBytes(newName);
+                        value = ClientTextEncoding.GetBytes(newName);
                     else if (column.Equals("name_bytes", StringComparison.OrdinalIgnoreCase))
-                        value = Encoding.UTF8.GetBytes(newName);
+                        value = ClientTextEncoding.GetBytes(newName);
                     else if (column.Equals("delete_flag", StringComparison.OrdinalIgnoreCase))
                         value = 0;
                     else if (column.Equals("slot_index", StringComparison.OrdinalIgnoreCase))
@@ -848,7 +849,7 @@ FROM characters
 WHERE delete_flag = 0
   AND (name = @name OR name = @nameBytes OR name_bytes = @nameBytes);";
                 cmd.Parameters.AddWithValue("@name", name);
-                cmd.Parameters.AddWithValue("@nameBytes", Encoding.UTF8.GetBytes(name));
+                cmd.Parameters.AddWithValue("@nameBytes", ClientTextEncoding.GetBytes(name));
                 return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
             }
         }
@@ -924,9 +925,13 @@ WHERE account_id = @aid
         {
             if (string.IsNullOrWhiteSpace(name))
                 return "角色名不能为空";
-            var bytes = Encoding.UTF8.GetByteCount(name);
-            if (bytes < 2 || bytes > 18)
-                return "角色名长度需要为 2-18 字节";
+            var encoded = ClientTextEncoding.GetBytes(name);
+            if (name.IndexOf('\0') >= 0 || ClientTextEncoding.GetString(encoded) != name)
+                return "角色名包含 GBK（936）无法表示的字符";
+            var bytes = encoded.Length;
+            if (name.Any(char.IsControl)) return "角色名不能包含控制字符";
+            if (bytes < 2 || bytes > 12)
+                return "角色名长度需为 2–12 字节：最多 6 个中文（全角）或 12 个字母、数字（半角），混合时全角按 2 字节计算";
             return null;
         }
 

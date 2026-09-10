@@ -16,7 +16,7 @@ namespace DfoGmTool.ServerCore.Game.Inventory
     /// <summary>
     /// Offline, one-way S4A12 -> S4A21 file conversion.
     ///
-    /// The input path is the old database itself.  A new A21 schema-v8 file is
+    /// The input path is the old database itself.  A new A21 schema-v26 file is
     /// built beside it and only after all checks pass is it atomically moved to
     /// the original path.  There is intentionally no A21 -> A12 path and no
     /// in-place table clearing.
@@ -24,7 +24,7 @@ namespace DfoGmTool.ServerCore.Game.Inventory
     public sealed class A12ToA21MigrationService
     {
         public const string RequiredConfirmation = "update";
-        public const int TargetSchemaVersion = 8;
+        public const int TargetSchemaVersion = 26;
 
         private static readonly object MigrationGate = new object();
         private readonly string _databasePath;
@@ -579,6 +579,7 @@ namespace DfoGmTool.ServerCore.Game.Inventory
             ImportEquippedItems(context.Source, target, transaction, validCharacters, report);
             ImportAchievementsAndTitleBook(context.Source, target, transaction, validCharacters, report);
             ReconcileAccountCargoState(target, transaction);
+            CharacterSlotLayout.Normalize(target, transaction);
             CheckForeignKeys(target, transaction);
             transaction.Commit();
         }
@@ -1384,7 +1385,7 @@ namespace DfoGmTool.ServerCore.Game.Inventory
                 source == null ? 0 : Int(source, "mode1_field0a"),
                 source == null ? 0 : Int(source, "mode1_field0b"),
                 source == null ? 1 : Int(source, "field_after_value"),
-                source == null ? null : Blob(source, "creature_text"),
+                source == null ? null : LegacyClientText.ConvertName(Blob(source, "creature_text")),
                 source == null ? 0 : Int(source, "tail_flag"),
                 source == null ? "{}" : (Text(source, "extra_json") == string.Empty ? "{}" : Text(source, "extra_json"))
             });
@@ -2033,7 +2034,11 @@ VALUES
                     || pair.Key.Equals("account_id", StringComparison.OrdinalIgnoreCase)
                     || pair.Key.Equals("character_id", StringComparison.OrdinalIgnoreCase)) continue;
                 cols.Add(pair.Key);
-                vals.Add(pair.Value ?? DBNull.Value);
+                vals.Add(table.Equals("characters", StringComparison.OrdinalIgnoreCase)
+                    && (pair.Key.Equals("name", StringComparison.OrdinalIgnoreCase)
+                        || pair.Key.Equals("name_bytes", StringComparison.OrdinalIgnoreCase))
+                    ? LegacyClientText.ConvertName(pair.Value) ?? DBNull.Value
+                    : pair.Value ?? DBNull.Value);
             }
             if (table.Equals("accounts", StringComparison.OrdinalIgnoreCase))
             {

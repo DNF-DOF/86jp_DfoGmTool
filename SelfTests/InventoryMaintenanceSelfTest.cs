@@ -70,7 +70,7 @@ namespace DfoGmTool.SelfTests
                     && DetailHas(status, "character", CharacterTwo, 0, 0, "item_core_null_or_invalid_length")
                     && DetailHas(status, "accountCargo", 0, 12, 987654322, "item_id_not_in_pvf");
                 Check("status details include all anomaly reasons and containers", detailsOk);
-                Check("status decodes UTF-8 BLOB character names",
+                Check("status decodes GBK BLOB character names",
                     DetailHasName(status, "character", CharacterOne, "角色一"));
                 Check("virtual currency slots are never reported",
                     DetailHasNo(status, "character", CharacterOne, 0, 0));
@@ -141,7 +141,7 @@ INSERT INTO accounts(account_id,m_id,password_hash) VALUES
 ({AccountTwo},'inventory-maintenance-two','');");
             Exec(connection, transaction, $@"
 INSERT INTO characters(character_id,account_id,name,job,grow_type,level,exp,slot_index) VALUES
-({CharacterOne},{AccountOne},CAST(X'E8A792E889B2E4B880' AS BLOB),0,0,1,0,0),
+({CharacterOne},{AccountOne},X'BDC7C9ABD2BB',0,0,1,0,0),
 ({CharacterTwo},{AccountTwo},'inventory-maintenance-two',0,0,1,0,0);");
             transaction.Commit();
         }

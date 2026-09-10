@@ -104,12 +104,12 @@ namespace DfoGmTool.ServerCore.Game.Skills
                 {
                     var sd = SkillDataProvider.GetSkill(job, entry.SkillId);
                     if (sd == null || !sd.IsFixedLevelSkill) continue;
-                    var fixedLv = sd.GetFixedLevel(charLevel);
+                    var fixedLv = sd.GetFixedLevel(charLevel, growType, secondGrowType);
                     if (fixedLv > entry.Level) entry.Level = (byte)Math.Min(fixedLv, byte.MaxValue);
                 }
             }
 
-            MergeGrants(snapshot, GetGrowTypeGrants(job, growType, secondGrowType), job, charLevel);
+            MergeGrants(snapshot, GetGrowTypeGrants(job, growType, secondGrowType), job, charLevel, growType, secondGrowType);
             return snapshot;
         }
 
@@ -119,7 +119,9 @@ namespace DfoGmTool.ServerCore.Game.Skills
             SkillInfoSnapshot snapshot,
             IReadOnlyList<SkillGrant> grants,
             byte job,
-            int charLevel)
+            int charLevel,
+            int growType = 0,
+            int secondGrowType = 0)
         {
             if (snapshot == null || grants == null || grants.Count == 0) return;
             while (snapshot.Pages.Count < 2)
@@ -133,7 +135,7 @@ namespace DfoGmTool.ServerCore.Game.Skills
                     var sd = SkillDataProvider.GetSkill(job, g.SkillIndex);
                     if (sd != null && sd.IsFixedLevelSkill)
                     {
-                        var fixedLv = sd.GetFixedLevel(charLevel);
+                        var fixedLv = sd.GetFixedLevel(charLevel, growType, secondGrowType);
                         if (fixedLv > grantLevel) grantLevel = fixedLv;
                     }
 

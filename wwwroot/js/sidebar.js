@@ -378,10 +378,14 @@ async function loadCharacters(accountId, expectedRuntimeEpoch = runtimeSourceEpo
     for (const c of data.characters) {
       const li = document.createElement('li');
       li.dataset.characterId = c.characterId;
-      li.innerHTML = `<div class="char-line"><span class="char-name">${escapeHtml(c.name)}</span>
+      li.innerHTML = `<div class="char-line"><span class="char-name-group"><span class="char-name">${escapeHtml(c.name)}</span><button type="button" class="char-rename" title="修改角色名" aria-label="修改${escapeHtml(c.name)}的名字">✎</button></span>
           <span class="char-lv">Lv.${c.level}</span></div>
         <div class="char-meta">${escapeHtml(c.jobName)} · #${c.characterId}</div>`;
       li.onclick = () => selectCharacter(c.characterId, li);
+      li.querySelector('.char-rename').onclick = (event) => {
+        event.stopPropagation();
+        renameSidebarCharacter(c, epoch);
+      };
       list.appendChild(li);
     }
     if (currentChar) {
@@ -392,6 +396,29 @@ async function loadCharacters(accountId, expectedRuntimeEpoch = runtimeSourceEpo
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+async function renameSidebarCharacter(character, expectedRuntimeEpoch = runtimeSourceEpoch) {
+  if (expectedRuntimeEpoch !== runtimeSourceEpoch) return;
+  if (!confirm(`确认当前角色不在线。\n角色：${character.name}\n点击确认后可修改名字。`)) return;
+  const input = prompt('请输入新名字：最多6个中文（全角）或12个字母、数字（半角）；混合时全角占2字节。', character.name);
+  if (input === null) return;
+  const name = input.trim();
+  const error = validateCharacterNameInput(name);
+  if (error) return toast(error, true);
+  if (expectedRuntimeEpoch !== runtimeSourceEpoch) return;
+  try {
+    const result = await post(`/api/characters/${character.characterId}/rename`, {
+      newName: name, expectedName: character.name, characterOffline: true,
+    });
+    if (expectedRuntimeEpoch !== runtimeSourceEpoch) return;
+    toast(`已改名为 ${result.name}，请在游戏中重新选择角色`);
+    const selectedAccountId = $('#account-select').value;
+    await refreshAccountsSidebar();
+    if (expectedRuntimeEpoch !== runtimeSourceEpoch || $('#account-select').value !== selectedAccountId) return;
+    await loadCharacters(Number(selectedAccountId), expectedRuntimeEpoch);
+    if (currentChar?.characterId === character.characterId) refreshHeader();
+  } catch (error) { if (expectedRuntimeEpoch === runtimeSourceEpoch) toast(error.message, true); }
 }
 
 async function selectCharacter(id, li) {
@@ -420,6 +447,7 @@ async function selectCharacter(id, li) {
     updateExtraEquipmentSlotButton();
     resetGiveUsableJobToCurrentCharacter();
     loadStats();
+    loadCharacterProgression();
     loadGoldLimit();
     loadSpTp();
     loadGrowOptions();

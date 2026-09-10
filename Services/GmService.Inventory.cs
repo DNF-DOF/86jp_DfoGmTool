@@ -29,6 +29,13 @@ namespace DfoGmTool.Services
                 return Error("角色不存在: " + characterId);
 
             var snapshot = _inventory.LoadCharacterItems(characterId, accountId);
+            // Virtual wallet rows remain editable even when a zero balance has
+            // no persisted ItemCore yet. This projection does not write the DB.
+            for (short slot = 0; slot <= 2; slot++)
+                if (!snapshot.Any(x => x.ListType == InventoryListType.Main && x.SlotIndex == slot))
+                    snapshot.Add(new NewInventoryItemRecord { CharacterId = characterId, AccountId = accountId,
+                        ListType = InventoryListType.Main, SlotIndex = slot,
+                        Core = new ItemCore { ItemKind = ItemCore.KindSpecialMaterial, ItemId = slot, Count = 0 } });
             var rentalExpireTimes = _supplementalItemExpiration.LoadRentalExpireTimes(characterId);
             TryLoadGrantCharacter(characterId, out var job, out _, out _);
 
@@ -65,7 +72,9 @@ namespace DfoGmTool.Services
                     listType = (int)item.ListType,
                     slot = (int)item.SlotIndex,
                     templateId = item.ItemTemplateId,
-                    name = pvfIndex.ResolveItemName(item.ItemTemplateId),
+                    name = item.ListType == InventoryListType.Main && item.SlotIndex is >= 0 and <= 2
+                        ? new[] { "金币", "复活币", "胜点" }[item.SlotIndex]
+                        : pvfIndex.ResolveItemName(item.ItemTemplateId),
                     kind,
                     rarity = pvfIndex.ResolveItemRarity(item.ItemTemplateId),
                     count = item.Count,
@@ -191,7 +200,7 @@ namespace DfoGmTool.Services
         // 主背包 slot 分段, 与服务端 ItemMetadataResolver.GetSlotRange / 各 Slot 常量一致
         private static string ResolveMainSegment(int slot)
         {
-            if (slot <= 2) return "货币";        // 0金币 1复活币 2技能点
+            if (slot <= 2) return "货币";        // 0金币 1复活币 2胜点
             if (slot <= A21InventorySlotPolicy.MainQuickSlotEnd) return "快捷栏";
             if (slot <= A21InventorySlotPolicy.MainEquipmentSlotEnd) return "装备";
             if (slot <= A21InventorySlotPolicy.MainConsumableSlotEnd) return "消耗品";
@@ -987,7 +996,7 @@ VALUES (
             return new { success = true, characterId, requestedAmount, amount, gold, goldCarryLimit = goldLimit.GoldCarryLimit };
         }
 
-        // 三种角色货币都写入新版 ItemCore 虚拟钱包槽：金币 slot0、复活币 slot1、技能点 slot2。
+        // 金币 slot0、复活币 slot1、决斗胜点 slot2。
         public object SetWalletValue(int characterId, string type, int value)
         {
             if (value < 0)
@@ -1022,9 +1031,12 @@ VALUES (
             switch (type)
             {
                 case "revive": slot = 1; break;
-                case "sp": slot = 2; break;
-                default: return Error("不支持的类型: " + type + " (可用: gold/revive/sp)");
+                case "sp": // Retain the legacy API alias, with the same limit.
+                case "winpoints": slot = 2; break;
+                default: return Error("不支持的类型: " + type + " (可用: gold/revive/winPoints)");
             }
+
+            if (slot == 2 && value > 999999) return Error("胜点最多可设置为 999999");
 
             if (!_inventory.TrySetVirtualCount(characterId, accountId, (short)slot, value))
                 return Error("货币设置失败(slot " + slot + ")");

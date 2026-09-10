@@ -566,7 +566,7 @@ WHERE excluded.clear_state > account_dungeon_permissions.clear_state;";
                     {
                         cmd.Transaction = tx;
                         cmd.CommandText = @"
-SELECT CAST(name AS BLOB), account_id
+SELECT name, account_id
 FROM characters
 WHERE character_id = @cid;";
                         cmd.Parameters.AddWithValue("@cid", characterId);
@@ -574,8 +574,9 @@ WHERE character_id = @cid;";
                         {
                             if (!reader.Read())
                                 return Error("角色不存在: " + characterId);
-                            nameBlob = (byte[])reader.GetValue(0);
-                            name = DecodeCharacterName(nameBlob);
+                            name = ReadCharacterName(reader, 0);
+                            nameBlob = reader.GetValue(0) as byte[]
+                                ?? ServerCore.Infrastructure.ClientTextEncoding.GetBytes(name);
                             accountId = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
                         }
                     }
@@ -714,6 +715,13 @@ WHERE seed_character_id = @cid
                     if (deletedCharacterRows == 0)
                         return Error("角色删除失败: " + characterId);
 
+                    if (TableExists(conn, tx, "united_friend_relations"))
+                        ExecuteNonQuery(conn, tx,
+                            "DELETE FROM united_friend_relations WHERE owner_name=@name OR friend_name=@name;",
+                            ("@name", name));
+
+                    ServerCore.Infrastructure.CharacterSlotLayout.Normalize(conn, tx, accountId);
+
                     tx.Commit();
 
                     return new
@@ -838,7 +846,7 @@ LIMIT 1;",
         {
             if (bytes == null || bytes.Length == 0)
                 return string.Empty;
-            return System.Text.Encoding.UTF8.GetString(bytes);
+            return ServerCore.Infrastructure.ClientTextEncoding.GetString(bytes);
         }
 
         // 玩家实际看到的 SP/TP: 总点数(等级表+加成) 与 剩余点数(扣除已学技能),

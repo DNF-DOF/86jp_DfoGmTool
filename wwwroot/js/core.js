@@ -37,6 +37,20 @@ function escapeHtml(value) {
     (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 }
 
+function validateCharacterNameInput(name) {
+  if (!name) return '角色名不能为空';
+  if (/[\u0000-\u001f\u007f]/u.test(name)) return '角色名不能包含控制字符';
+  let bytes = 0;
+  for (const character of name) {
+    const code = character.codePointAt(0);
+    if (code > 0xffff || (code >= 0xd800 && code <= 0xdfff)) return '角色名包含 GBK 无法表示的字符';
+    bytes += code <= 0x7f ? 1 : 2;
+  }
+  if (bytes < 2 || bytes > 12) return '名字最多6个中文（全角）或12个字母、数字（半角）；混合时全角占2字节，总长度需为2～12字节';
+  // The backend also validates exact GBK representability and uniqueness.
+  return null;
+}
+
 const SERVER_TIME_ZONE = 'Asia/Shanghai';
 const SERVER_UTC_OFFSET_SECONDS = 8 * 60 * 60;
 const DAILY_DELETE_HOUR = 6;

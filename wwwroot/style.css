@@ -516,6 +516,28 @@ aside {
   justify-content: space-between;
 }
 
+.char-name-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.char-rename {
+  flex-shrink: 0;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.char-rename:hover,
+.char-rename:focus-visible {
+  background: var(--surface-hover);
+}
+
 .char-lv {
   flex-shrink: 0;
   padding: 1px 8px;

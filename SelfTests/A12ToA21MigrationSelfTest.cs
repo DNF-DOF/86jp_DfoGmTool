@@ -28,6 +28,11 @@ namespace DfoGmTool.SelfTests
             {
                 var source = Path.Combine(root, "a12.db");
                 CreateSource(source, duplicateCharacterName: false);
+                using (var connection = Open(source))
+                {
+                    ExecBlob(connection, "UPDATE characters SET name=@core WHERE character_id=11;", System.Text.Encoding.UTF8.GetBytes("迁移角色"));
+                    ExecBlob(connection, "UPDATE character_creatures SET creature_text=@core WHERE character_id=10;", System.Text.Encoding.UTF8.GetBytes("迁移宠物"));
+                }
                 ProbeReadOnlyAndLeaveEmptySidecars(source);
                 var before = Hash(source);
                 var service = CreateService(source, pvf);
@@ -46,6 +51,16 @@ namespace DfoGmTool.SelfTests
 
                 var report = service.Execute(true, "uPdAtE");
                 Check("execute 原子替换成功", report.Success && report.ReplacementCompleted && File.Exists(source), ref failures);
+                using (var connection = Open(source))
+                using (var command = connection.CreateCommand())
+                {
+                    command.CommandText = "SELECT name FROM characters WHERE character_id=11;";
+                    Check("A12 UTF-8 角色名转 GBK", command.ExecuteScalar() is byte[] nameBytes
+                        && nameBytes.SequenceEqual(ClientTextEncoding.GetBytes("迁移角色")), ref failures);
+                    command.CommandText = "SELECT creature_text FROM character_creatures WHERE character_id=10;";
+                    Check("A12 UTF-8 宠物名转 GBK", command.ExecuteScalar() is byte[] petBytes
+                        && petBytes.SequenceEqual(ClientTextEncoding.GetBytes("迁移宠物")), ref failures);
+                }
                 Check("execute 使用预检源 SHA256", report.SourceSha256 == before, ref failures);
                 Check("execute 报告迁移计数与预览一致", report.MigratedRows == preview.MigratedRows, ref failures);
                 Check("完成状态只写入合法记录", Count(source, "SELECT COUNT(*) FROM character_quest_completions WHERE character_id=10") == 2
@@ -59,10 +74,12 @@ namespace DfoGmTool.SelfTests
                 Check("伪史诗物品不写入目标史诗 blob", report.Success && !TargetEpicBlobContains(source, MissingEpicPieceId), ref failures);
                 Check("成功替换后不留下旧 WAL/SHM", !File.Exists(source + "-wal") && !File.Exists(source + "-shm"), ref failures);
                 Check("成功不留下自动回滚备份", !Directory.EnumerateFiles(root, "*.a12-rollback-*.db").Any(), ref failures);
-                Check("目标 schema-v8 可被 guard 打开", GuardOk(source)
+                Check("目标 schema-v26 可被 guard 打开", GuardOk(source)
                     && Count(source, "SELECT schema_version FROM schema_metadata WHERE singleton_id=1") == A12ToA21MigrationService.TargetSchemaVersion
                     && ReadVersion(source) == A12ToA21MigrationService.TargetSchemaVersion, ref failures);
-                Check("账号/角色 ID 与 -1 槽位已保留并重排", Count(source, "SELECT COUNT(*) FROM accounts WHERE account_id=1") == 1 && Count(source, "SELECT slot_index FROM characters WHERE character_id=10") == 2, ref failures);
+                Check("账号/角色 ID 保留且槽位按原顺序连续重排", Count(source, "SELECT COUNT(*) FROM accounts WHERE account_id=1") == 1
+                    && Count(source, "SELECT slot_index FROM characters WHERE character_id=10") == 1
+                    && Count(source, "SELECT slot_index FROM characters WHERE character_id=11") == 0, ref failures);
                 Check("82B/extra_json 转 99B 且保留前缀", HasCore(source, 10, ItemCore.KindConsumable, 100, ItemCore.EnchantCardIdOffset, 0x123456), ref failures);
                 Check("快捷消耗栏 3-8 原位保留", Count(source, "SELECT COUNT(*) FROM character_inventory_items WHERE character_id=10 AND list_type=0 AND slot_index BETWEEN 3 AND 8") == 6
                     && HasItemAt(source, 10, 0, 3, 100) && HasItemAt(source, 10, 0, 8, 100), ref failures);

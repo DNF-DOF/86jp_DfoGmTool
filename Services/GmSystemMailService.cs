@@ -49,7 +49,9 @@ namespace DfoGmTool.Services
             int count,
             ItemGrantOptions options,
             string requestId,
-            string itemName)
+            string itemName,
+            SqliteConnection connection = null,
+            SqliteTransaction transaction = null)
         {
             requestId = (requestId ?? string.Empty).Trim();
             if (!RequestIdPattern.IsMatch(requestId))
@@ -66,9 +68,13 @@ namespace DfoGmTool.Services
 
             try
             {
-                using var connection = new SqliteConnection(_connectionString);
-                connection.Open();
-                using var transaction = connection.BeginTransaction(deferred: false);
+                if ((connection == null) != (transaction == null))
+                    throw new ArgumentException("邮件连接与事务必须同时提供");
+                using var ownedConnection = connection == null ? new SqliteConnection(_connectionString) : null;
+                if (ownedConnection != null) ownedConnection.Open();
+                connection ??= ownedConnection;
+                using var ownedTransaction = transaction == null ? connection.BeginTransaction(deferred: false) : null;
+                transaction ??= ownedTransaction;
 
                 if (!TryLoadCharacter(
                         connection,
@@ -162,7 +168,7 @@ namespace DfoGmTool.Services
                     messageIds.Add(messageId);
                 }
 
-                transaction.Commit();
+                ownedTransaction?.Commit();
                 return new GmSystemMailResult
                 {
                     Success = true,
@@ -215,7 +221,10 @@ LIMIT 1;";
             }
 
             accountId = reader.GetInt32(0);
-            characterName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            characterName = reader.IsDBNull(1) ? string.Empty
+                : reader.GetValue(1) is byte[] bytes
+                    ? ServerCore.Infrastructure.ClientTextEncoding.GetString(bytes)
+                    : reader.GetString(1);
             job = reader.GetInt32(2);
             return true;
         }

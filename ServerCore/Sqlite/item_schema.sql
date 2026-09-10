@@ -1,4 +1,4 @@
-PRAGMA foreign_keys = ON;
+﻿PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS accounts (
     account_id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -637,7 +637,7 @@ CREATE TABLE IF NOT EXISTS character_subtype0_fields (
     channel_display_mode INTEGER NOT NULL DEFAULT 0,    -- +74 u16
     channel_type INTEGER NOT NULL DEFAULT 0,            -- +76 u8
     channel_id INTEGER NOT NULL DEFAULT 2,              -- 历史快照字段，不再序列化到 subtype0 +77
-    mood_value INTEGER NOT NULL DEFAULT 0,              -- +77 u16 mood popup default; 0=normal
+    mood_value INTEGER NOT NULL DEFAULT 0,              -- +77 u16 mood popup default; 0=normal; A21 无工会 64B 尾 +59
     is_return_user INTEGER NOT NULL DEFAULT 0,          -- +80 u8
     link_slot_enabled INTEGER NOT NULL DEFAULT 0,       -- +81 u8
     link_type_a INTEGER NOT NULL DEFAULT 0,             -- +82 u8 (sub_F50410)
@@ -812,6 +812,33 @@ CREATE TABLE IF NOT EXISTS character_daily_counters (
     FOREIGN KEY (character_id) REFERENCES characters(character_id) ON DELETE CASCADE
 );
 
+-- 暗精灵遗迹周期状态。日/月边界均采用北京时间06:00；每日进入次数与
+-- 月累计进入/骨龙出现次数属于同一角色业务状态，由 LicensedDungeonService
+-- 在同一事务内滚动和提交，不复用仅支持 day/week 的通用计数器。
+CREATE TABLE IF NOT EXISTS character_license_dungeon_period_state (
+    character_id INTEGER PRIMARY KEY,
+    day_id INTEGER NOT NULL DEFAULT 0,
+    daily_entry_count INTEGER NOT NULL DEFAULT 0 CHECK(daily_entry_count >= 0),
+    month_id INTEGER NOT NULL DEFAULT 0,
+    monthly_entry_count INTEGER NOT NULL DEFAULT 0 CHECK(monthly_entry_count >= 0),
+    monthly_groop_appear_count INTEGER NOT NULL DEFAULT 0 CHECK(monthly_groop_appear_count >= 0),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (character_id) REFERENCES characters(character_id) ON DELETE CASCADE
+);
+
+-- 暗精灵遗迹 759 许可星级。每个角色、每个 PVF group 独立保存当前已解锁
+-- 星级；新角色从该 group 的最低许可等级开始，只能在当前星级通关后推进一档。
+CREATE TABLE IF NOT EXISTS character_license_dungeon_progress (
+    character_id INTEGER NOT NULL,
+    group_id INTEGER NOT NULL CHECK (group_id > 0),
+    license_level INTEGER NOT NULL CHECK (license_level > 0),
+    no_revive_clear_count INTEGER NOT NULL DEFAULT 0
+        CHECK (no_revive_clear_count >= 0),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (character_id, group_id),
+    FOREIGN KEY (character_id) REFERENCES characters(character_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS character_usable_count_limits (
     character_id INTEGER NOT NULL,
     item_id INTEGER NOT NULL,
@@ -825,6 +852,77 @@ CREATE TABLE IF NOT EXISTS character_usable_count_limits (
 
 CREATE INDEX IF NOT EXISTS idx_character_usable_count_limits_character_day
     ON character_usable_count_limits(character_id, day_id);
+
+CREATE TABLE IF NOT EXISTS dungeon_limit_config (
+    dgn_id INTEGER PRIMARY KEY CHECK (dgn_id > 0),
+    scope_type TEXT NOT NULL DEFAULT 'charac'
+        CHECK (scope_type IN ('charac', 'account')),
+    limit_count INTEGER NOT NULL DEFAULT 0
+        CHECK (limit_count >= 0 AND limit_count <= 255),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_dungeon_limit_config_sort
+    ON dungeon_limit_config(enabled, sort_order, dgn_id);
+
+INSERT OR IGNORE INTO dungeon_limit_config (
+    dgn_id, scope_type, limit_count, enabled, sort_order
+) VALUES
+    (11006, 'charac', 3, 1, 0),
+    (11007, 'charac', 3, 1, 1),
+    (3054, 'charac', 3, 1, 2),
+    (3056, 'charac', 3, 1, 3),
+    (3057, 'charac', 1, 1, 4),
+    (122, 'charac', 9, 1, 5),
+    (4000, 'charac', 1, 1, 6),
+    (3706, 'charac', 3, 1, 7),
+    (4108, 'charac', 1, 1, 8),
+    (4109, 'charac', 1, 1, 9),
+    (4110, 'charac', 1, 1, 10),
+    (4111, 'charac', 1, 1, 11),
+    (4103, 'charac', 3, 1, 12),
+    (4114, 'charac', 3, 1, 13),
+    (4115, 'charac', 3, 1, 14),
+    (4116, 'charac', 3, 1, 15),
+    (4117, 'charac', 3, 1, 16),
+    (4118, 'charac', 3, 1, 17),
+    (4130, 'charac', 3, 1, 18),
+    (3900, 'charac', 3, 1, 19),
+    (4124, 'charac', 1, 1, 20),
+    (4125, 'charac', 1, 1, 21),
+    (4126, 'charac', 1, 1, 22),
+    (4127, 'charac', 1, 1, 23),
+    (4128, 'charac', 1, 1, 24),
+    (4123, 'charac', 3, 1, 25);
+
+CREATE TABLE IF NOT EXISTS dungeon_limit_records (
+    account_id INTEGER NOT NULL,
+    character_id INTEGER NOT NULL DEFAULT 0 CHECK (character_id >= 0),
+    dgn_id INTEGER NOT NULL,
+    day_id INTEGER NOT NULL DEFAULT 0,
+    current_count INTEGER NOT NULL DEFAULT 0 CHECK (current_count >= 0),
+    extra_count INTEGER NOT NULL DEFAULT 0 CHECK (extra_count >= 0),
+    used_count INTEGER NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id, character_id, dgn_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE,
+    FOREIGN KEY (dgn_id) REFERENCES dungeon_limit_config(dgn_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_dungeon_limit_records_account_char_day
+    ON dungeon_limit_records(account_id, character_id, day_id);
+
+CREATE TABLE IF NOT EXISTS character_dimensiongate_records (
+    character_id INTEGER PRIMARY KEY,
+    day_id INTEGER NOT NULL DEFAULT 0,
+    current_count INTEGER NOT NULL DEFAULT 0 CHECK (current_count >= 0),
+    extra_count INTEGER NOT NULL DEFAULT 0 CHECK (extra_count >= 0),
+    used_count INTEGER NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (character_id) REFERENCES characters(character_id) ON DELETE CASCADE
+);
 
 -- 绝望之塔永久楼层进度。客户端始终请求第一层入口，服务端按最高通关层重定向到下一层。
 CREATE TABLE IF NOT EXISTS character_tower_of_despair_progress (
@@ -1028,6 +1126,284 @@ CREATE TABLE IF NOT EXISTS account_increase_chance_lottery_progress (
     PRIMARY KEY (account_id, item_template_id, reward_index),
     FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
 );
+
+-- 好友关系表（UnitedFriendSystem，单向 A→B，见 Docs/好友系统服务端设计文档.md §2.2）。
+-- 键用角色名（非 character_id）：联合服好友可跨服，本服 characters 表不含对方角色；
+-- 且好友关系应存活于角色删除之后，不随 character 级联。
+-- 键与 characters.name 对齐：BINARY(默认) 大小写敏感——Abc 与 abc 是两个不同角色，
+-- NOCASE 会把它们当同一好友(内存字典同键/表 PK 冲突)。
+-- PK(owner_name, friend_name) 同时充当正向查询/唯一约束；friend_name 索引覆盖"谁把 X 加为好友"反向查询。
+CREATE TABLE IF NOT EXISTS united_friend_relations (
+    owner_name  TEXT NOT NULL,
+    friend_name TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (owner_name, friend_name)
+);
+CREATE INDEX IF NOT EXISTS idx_united_friend_relations_friend
+    ON united_friend_relations(friend_name);
+
+CREATE TABLE IF NOT EXISTS game_event_state (
+    event_id INTEGER PRIMARY KEY,
+    state INTEGER NOT NULL DEFAULT 0 CHECK(state IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS game_event_info_details (
+    event_id INTEGER PRIMARY KEY,
+    unknown0 INTEGER NOT NULL DEFAULT 0,
+    start_notice TEXT NOT NULL DEFAULT '',
+    end_notice TEXT NOT NULL DEFAULT '',
+    detail_flag INTEGER NOT NULL DEFAULT 0 CHECK(detail_flag IN (0, 1)),
+    flag_a INTEGER NOT NULL DEFAULT 0 CHECK(flag_a >= 0 AND flag_a <= 255),
+    flag_b INTEGER NOT NULL DEFAULT 0 CHECK(flag_b >= 0 AND flag_b <= 255),
+    title TEXT NOT NULL DEFAULT '',
+    short_name TEXT NOT NULL DEFAULT '',
+    reserved_or_icon TEXT NOT NULL DEFAULT '',
+    start_unix_time INTEGER NOT NULL DEFAULT 0,
+    end_unix_time INTEGER NOT NULL DEFAULT 0,
+    link_key TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    detail_enabled INTEGER NOT NULL DEFAULT 0 CHECK(detail_enabled IN (0, 1)),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES game_event_state(event_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS game_event_info_extra (
+    event_id INTEGER PRIMARY KEY,
+    param0 INTEGER NOT NULL DEFAULT 0,
+    param1 INTEGER NOT NULL DEFAULT 0,
+    param2 INTEGER NOT NULL DEFAULT 0,
+    param3 INTEGER NOT NULL DEFAULT 0,
+    param4 INTEGER NOT NULL DEFAULT 0,
+    param5 INTEGER NOT NULL DEFAULT 0,
+    param6 INTEGER NOT NULL DEFAULT 0,
+    param7 INTEGER NOT NULL DEFAULT 0,
+    param8 INTEGER NOT NULL DEFAULT 0,
+    param9 INTEGER NOT NULL DEFAULT 0,
+    param10 INTEGER NOT NULL DEFAULT 0,
+    param11 INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES game_event_state(event_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_joust_rules (
+    event_id INTEGER PRIMARY KEY,
+    current_round INTEGER NOT NULL DEFAULT 1 CHECK(current_round > 0),
+    current_day_id INTEGER NOT NULL DEFAULT 0,
+    current_schedule_index INTEGER NOT NULL DEFAULT -1,
+    start_hour INTEGER NOT NULL DEFAULT 10 CHECK(start_hour >= 0 AND start_hour < 24),
+    rounds_per_day INTEGER NOT NULL DEFAULT 7 CHECK(rounds_per_day > 0),
+    round_interval_minutes INTEGER NOT NULL DEFAULT 120 CHECK(round_interval_minutes > 0),
+    betting_duration_minutes INTEGER NOT NULL DEFAULT 90 CHECK(betting_duration_minutes > 0),
+    stop_betting_minutes INTEGER NOT NULL DEFAULT 10 CHECK(stop_betting_minutes >= 0),
+    result_stage_count INTEGER NOT NULL DEFAULT 3 CHECK(result_stage_count = 3),
+    result_stage_interval_seconds INTEGER NOT NULL DEFAULT 200 CHECK(result_stage_interval_seconds > 0),
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES game_event_state(event_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_joust_round_slots (
+    round_no INTEGER NOT NULL,
+    slot_no INTEGER NOT NULL CHECK(slot_no >= 0 AND slot_no < 8),
+    knight_index INTEGER NOT NULL,
+    is_black INTEGER NOT NULL DEFAULT 0 CHECK(is_black IN (0, 1)),
+    attack_type INTEGER NOT NULL DEFAULT 0,
+    condition_index INTEGER NOT NULL DEFAULT 0 CHECK(condition_index >= 0 AND condition_index <= 4),
+    global_bet_amount INTEGER NOT NULL DEFAULT 0 CHECK(global_bet_amount >= 0),
+    round_day_id INTEGER NOT NULL DEFAULT 0,
+    schedule_index INTEGER NOT NULL DEFAULT -1,
+    round_start_unix_time INTEGER NOT NULL DEFAULT 0,
+    created_at_unix INTEGER NOT NULL DEFAULT 0,
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (round_no, slot_no),
+    UNIQUE (round_no, knight_index)
+);
+
+CREATE TABLE IF NOT EXISTS event_joust_knight_stats (
+    knight_index INTEGER PRIMARY KEY,
+    win_count INTEGER NOT NULL DEFAULT 0 CHECK(win_count >= 0),
+    loss_count INTEGER NOT NULL DEFAULT 0 CHECK(loss_count >= 0),
+    updated_at_unix INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS event_joust_character_bets (
+    round_no INTEGER NOT NULL,
+    character_id INTEGER NOT NULL,
+    slot_no INTEGER NOT NULL CHECK(slot_no >= 0 AND slot_no < 8),
+    knight_index INTEGER NOT NULL,
+    bet_amount INTEGER NOT NULL DEFAULT 0 CHECK(bet_amount >= 0),
+    reward_mail_sent INTEGER NOT NULL DEFAULT 0 CHECK(reward_mail_sent IN (0, 1)),
+    reward_mail_sent_at INTEGER NOT NULL DEFAULT 0,
+    created_at_unix INTEGER NOT NULL DEFAULT 0,
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (round_no, character_id, slot_no),
+    FOREIGN KEY (round_no, slot_no)
+        REFERENCES event_joust_round_slots(round_no, slot_no)
+        ON DELETE CASCADE,
+    FOREIGN KEY (character_id) REFERENCES characters(character_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_joust_bets_reward
+    ON event_joust_character_bets(round_no, reward_mail_sent);
+
+CREATE TABLE IF NOT EXISTS event_joust_results (
+    round_no INTEGER PRIMARY KEY,
+    stage_index INTEGER NOT NULL DEFAULT -1,
+    slot0 INTEGER NOT NULL DEFAULT 0,
+    slot1 INTEGER NOT NULL DEFAULT 0,
+    slot2 INTEGER NOT NULL DEFAULT 0,
+    slot3 INTEGER NOT NULL DEFAULT 0,
+    slot4 INTEGER NOT NULL DEFAULT 0,
+    slot5 INTEGER NOT NULL DEFAULT 0,
+    slot6 INTEGER NOT NULL DEFAULT 0,
+    slot7 INTEGER NOT NULL DEFAULT 0,
+    slot8 INTEGER NOT NULL DEFAULT 0,
+    slot9 INTEGER NOT NULL DEFAULT 0,
+    slot10 INTEGER NOT NULL DEFAULT 0,
+    slot11 INTEGER NOT NULL DEFAULT 0,
+    slot12 INTEGER NOT NULL DEFAULT 0,
+    slot13 INTEGER NOT NULL DEFAULT 0,
+    updated_at_unix INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS event_joust_match_results (
+    round_no INTEGER NOT NULL,
+    stage_index INTEGER NOT NULL CHECK(stage_index >= 0 AND stage_index < 3),
+    match_index INTEGER NOT NULL CHECK(match_index >= 0 AND match_index < 4),
+    winner_slot_no INTEGER NOT NULL CHECK(winner_slot_no >= 0 AND winner_slot_no < 8),
+    loser_slot_no INTEGER NOT NULL CHECK(loser_slot_no >= 0 AND loser_slot_no < 8),
+    winner_knight_index INTEGER NOT NULL,
+    loser_knight_index INTEGER NOT NULL,
+    resolved_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (round_no, stage_index, match_index)
+);
+
+CREATE TABLE IF NOT EXISTS event_joust_history (
+    round_no INTEGER PRIMARY KEY,
+    winner_horse_id INTEGER NOT NULL,
+    odds_x10 INTEGER NOT NULL DEFAULT 80,
+    settled_at_unix INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS event_pcroom_timepoint_daily (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    day_id INTEGER NOT NULL,
+    online_millis INTEGER NOT NULL DEFAULT 0 CHECK(online_millis >= 0),
+    daily_claim_mask INTEGER NOT NULL DEFAULT 0
+        CHECK(daily_claim_mask >= 0 AND daily_claim_mask <= 15),
+    cycle_recorded INTEGER NOT NULL DEFAULT 0
+        CHECK(cycle_recorded IN (0, 1)),
+    last_flushed_at_unix INTEGER NOT NULL DEFAULT 0,
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, event_id, season_id, day_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_pcroom_timepoint_daily_day
+    ON event_pcroom_timepoint_daily(event_id, season_id, day_id);
+
+CREATE TABLE IF NOT EXISTS event_pcroom_timepoint_period (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    completed_cycle_count INTEGER NOT NULL DEFAULT 0
+        CHECK(completed_cycle_count >= 0),
+    period_claim_mask INTEGER NOT NULL DEFAULT 0
+        CHECK(period_claim_mask >= 0 AND period_claim_mask <= 15),
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, event_id, season_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_daily_attendance_anytime_account (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    total_attendance_count INTEGER NOT NULL DEFAULT 0
+        CHECK(total_attendance_count >= 0),
+    accumulate_claimed_mask INTEGER NOT NULL DEFAULT 0
+        CHECK(accumulate_claimed_mask >= 0 AND accumulate_claimed_mask <= 7),
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, event_id, season_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_daily_attendance_anytime_daily (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    day_id INTEGER NOT NULL,
+    recommend_clear_count INTEGER NOT NULL DEFAULT 0
+        CHECK(recommend_clear_count >= 0),
+    attended INTEGER NOT NULL DEFAULT 0 CHECK(attended IN (0, 1)),
+    daily_reward_day_index INTEGER NOT NULL DEFAULT -1,
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, event_id, season_id, day_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_daily_attendance_anytime_daily_day
+    ON event_daily_attendance_anytime_daily(event_id, season_id, day_id);
+
+CREATE TABLE IF NOT EXISTS event_daily_attendance_anytime_clear_events (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    day_id INTEGER NOT NULL,
+    source_event_id TEXT NOT NULL,
+    dungeon_id INTEGER NOT NULL DEFAULT 0,
+    character_id INTEGER NOT NULL DEFAULT 0,
+    created_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (
+        account_id, event_id, season_id, day_id, source_event_id
+    ),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS account_recommend_dungeon_clear_stats (
+    account_id INTEGER NOT NULL,
+    period_type INTEGER NOT NULL,
+    period_id INTEGER NOT NULL,
+    clear_count INTEGER NOT NULL DEFAULT 0
+        CHECK(clear_count >= 0),
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, period_type, period_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_recommend_dungeon_clear_stats_period
+    ON account_recommend_dungeon_clear_stats(period_type, period_id);
+
+CREATE TABLE IF NOT EXISTS event_total_attendance_account (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    total_attendance_week_count INTEGER NOT NULL DEFAULT 0
+        CHECK(total_attendance_week_count >= 0),
+    total_reward_sent_mask INTEGER NOT NULL DEFAULT 0
+        CHECK(total_reward_sent_mask >= 0 AND total_reward_sent_mask <= 7),
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, event_id, season_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_total_attendance_weekly (
+    account_id INTEGER NOT NULL,
+    event_id INTEGER NOT NULL,
+    season_id INTEGER NOT NULL DEFAULT 1,
+    week_id INTEGER NOT NULL,
+    checked INTEGER NOT NULL DEFAULT 0 CHECK(checked IN (0, 1)),
+    weekly_reward_index INTEGER NOT NULL DEFAULT -1,
+    updated_at_unix INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, event_id, season_id, week_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_total_attendance_weekly_week
+    ON event_total_attendance_weekly(event_id, season_id, week_id);
 
 -- 服务端协议默认配置，不包含玩家账号或角色数据。
 INSERT OR IGNORE INTO get_userinfo_template (

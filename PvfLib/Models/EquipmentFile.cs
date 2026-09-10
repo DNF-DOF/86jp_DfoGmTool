@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace GmPvfLib
 {
@@ -70,6 +71,8 @@ namespace GmPvfLib
         public int HitRecovery { get; set; }
         public int AttackSuccess { get; set; }
         public int CreatureFoodConsumeRate { get; set; }
+        // 快捷栏纹章的杀怪经验加成（百分比, 如 30 = +30%）。
+        public int ExpAdvantage { get; set; }
 
         #endregion
 
@@ -112,6 +115,8 @@ namespace GmPvfLib
         public int OutputIndex { get; set; } = -1;
         public int[] ForceResultItemRule { get; set; }
         public int ClearAvatar { get; set; }
+        public List<int> EnableDye { get; set; } = new List<int>();
+        public bool IsDyeEnabled => EnableDye.Count > 0 && EnableDye[0] == 1;
         
         public string UsableJob { get; set; }
         public string ImpossibleContents { get; set; }
@@ -178,6 +183,7 @@ namespace GmPvfLib
                     case "hit recovery": equ.HitRecovery = ParseInt(data); break;
                     case "attack success": equ.AttackSuccess = ParseInt(data); break;
                     case "creature food consume rate": equ.CreatureFoodConsumeRate = ParseInt(data); break;
+                    case "exp advantage": equ.ExpAdvantage = ParseInt(data); break;
 
                     
                     case "price": equ.Price = ParseInt(data); break;
@@ -206,6 +212,7 @@ namespace GmPvfLib
                     case "output index": equ.OutputIndex = ParseInt(data); break;
                     case "force result item rule": equ.ForceResultItemRule = ParseIntArray(data); break;
                     case "clear avatar": equ.ClearAvatar = ParseInt(data); break;
+                    case "enable dye": equ.EnableDye = ParseIntList(node, content); break;
                     case "usable job": equ.UsableJob = StripBacktick(data); break;
                     case "impossible contents":
                         equ.ImpossibleContents = data;
@@ -214,6 +221,9 @@ namespace GmPvfLib
                     case "item category": equ.ItemCategory = StripBacktick(data); break;
                 }
             }
+
+            if (equ.EnableDye.Count == 0)
+                equ.EnableDye = ParseInlineTagInts(content, "enable dye");
 
             return equ;
         }
@@ -233,6 +243,29 @@ namespace GmPvfLib
             }
 
             return result;
+        }
+
+        private static List<int> ParseIntList(ScriptNode node, string content)
+        {
+            return PvfScriptValueReader.ReadIntegers(node, content);
+        }
+
+        private static List<int> ParseInlineTagInts(string content, string tag)
+        {
+            if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(tag))
+                return new List<int>();
+
+            var pattern = @"\[" + Regex.Escape(tag) + @"\](?<body>.*?)\[/"
+                + Regex.Escape(tag) + @"\]";
+            var match = Regex.Match(
+                content,
+                pattern,
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (!match.Success)
+                return new List<int>();
+
+            var values = ParseIntArray(match.Groups["body"].Value);
+            return values != null ? new List<int>(values) : new List<int>();
         }
 
         private static EquipmentEmancipateInfo ParseEmancipate(ScriptNode node, string content)

@@ -122,6 +122,7 @@ function startRuntimeWorkspace() {
 
 function applyRuntimeStatus(status) {
   runtimeStatus = status;
+  if (typeof updateClientTextEnvironment === 'function') updateClientTextEnvironment(status);
   if (typeof updateA12A21MigrationEnvironment === 'function')
     updateA12A21MigrationEnvironment(status);
   const authenticationRequired = Boolean(status && status.authenticationRequired);

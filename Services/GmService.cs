@@ -34,6 +34,8 @@ namespace DfoGmTool.Services
         public GmService(GmConfig config, PvfIndexService pvfIndex)
         {
             _config = config;
+            _professionCatalog = new Lazy<CharacterProfessionCatalog>(() => new CharacterProfessionCatalog(config.PvfPath));
+            _duelCatalog = new Lazy<CharacterDuelCatalog>(() => new CharacterDuelCatalog(config.PvfPath));
             _pvfIndex = pvfIndex;
             _inventory = new NewInventoryStore(config.DatabasePath, config.SchemaPath);
             _supplementalItemExpiration = new SupplementalItemExpirationService(config.ConnectionString);

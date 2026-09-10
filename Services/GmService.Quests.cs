@@ -81,6 +81,10 @@ ORDER BY slot;";
                     if (!activeQuest.ActivationId.Equals(expectedActivation))
                         return Error("任务已经重新接取或被服务端替换，请刷新任务列表后重试");
 
+                    if (!TrySupplyQuestItems(conn, tx, characterId, _pvfIndex.GetQuestMeta(questId),
+                        out var itemDelivery, out var itemError))
+                        return Error(itemError);
+
                     if (!QuestRepository.TryUpdateTriggerValueCas(
                         conn,
                         tx,
@@ -101,6 +105,7 @@ ORDER BY slot;";
                         questId,
                         activationId = activeQuest.ActivationId.ToString(),
                         version = activeQuest.Version + 1,
+                        itemDelivery,
                     };
                 }
             }
@@ -1355,6 +1360,7 @@ WHERE character_id = @cid AND quest_id = @qid;";
 
             int level = -1, job = -1, grow = -1;
             var activationId = string.Empty;
+            QuestItemDelivery itemDelivery;
             using (var conn = new SqliteConnection(_config.ConnectionString))
             {
                 conn.Open();
@@ -1429,11 +1435,13 @@ WHERE character_id = @cid AND quest_id = @qid;";
                     }
 
                     QuestRepository.DeleteClearedFlag(conn, tx, characterId, (ushort)questId);
+                    if (!TrySupplyQuestItems(conn, tx, characterId, meta, out itemDelivery, out var itemError))
+                        return Error(itemError);
                     tx.Commit();
                 }
             }
 
-            return new { success = true, characterId, questId, activationId };
+            return new { success = true, characterId, questId, activationId, itemDelivery };
         }
 
         public object ResetVisibleDailyQuests(int characterId, PvfIndexService pvfIndex)

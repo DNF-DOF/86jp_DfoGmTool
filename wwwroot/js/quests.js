@@ -101,12 +101,24 @@ async function questAction(questId, action, message, activationId = null) {
     const activationQuery = action === 'ready'
       ? `?activationId=${encodeURIComponent(activationId || '')}`
       : '';
-    await post(`/api/characters/${currentChar.characterId}/quests/${questId}/${action}${activationQuery}`);
-    toast(message);
+    const result = await post(`/api/characters/${currentChar.characterId}/quests/${questId}/${action}${activationQuery}`);
+    if (action === 'ready') showQuestReadyResult(result, message);
+    else toast(message);
     refreshQuestViews();
   } catch (e) {
     toast(e.message, true);
   }
+}
+
+function showQuestReadyResult(result, message) {
+  const delivery = result?.itemDelivery;
+  const parts = [message];
+  if (delivery?.inventoryCount > 0) parts.push(`已向背包补发 ${delivery.inventoryCount} 件任务道具`);
+  if (delivery?.mailedCount > 0) parts.push(`背包空间不足，${delivery.mailedCount} 件道具已通过 ${delivery.mailCount} 封邮件发放`);
+  if (delivery?.pendingMailCount > 0) parts.push(`另有 ${delivery.pendingMailCount} 件所需道具在未领取的补发邮件中`);
+  parts.push('请在游戏中返回角色选择界面，重新选择该角色');
+  if (delivery?.mailedCount > 0 || delivery?.pendingMailCount > 0) parts.push('请先腾出背包空间并领取邮件附件，再交付任务');
+  window.alert(parts.join('。\n') + '。');
 }
 
 // ---- 主线/成就总览(共用区域侧栏+链树组件) ----
@@ -755,8 +767,8 @@ function emitQuestRow(tbody, viewKey, quest, depth, chainHead) {
           const r = await post(`/api/characters/${currentChar.characterId}/quests/${quest.questId}/complete-chain`);
           toast(`已完成 ${r.completedCount} 个任务(链共 ${r.chainSize} 个)`);
         } else if (act === 'daily-ready') {
-          await post(`/api/characters/${currentChar.characterId}/quests/${quest.questId}/daily-ready`);
-          toast('每日任务已接取并标记可交');
+          const result = await post(`/api/characters/${currentChar.characterId}/quests/${quest.questId}/daily-ready`);
+          showQuestReadyResult(result, '每日任务已接取并标记可交');
         } else {
           await post(`/api/characters/${currentChar.characterId}/quests/${quest.questId}/${act}`);
           toast(act === 'unclear' ? '已取消完成标记' : '已标记完成');

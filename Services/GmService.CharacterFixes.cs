@@ -219,7 +219,7 @@ WHERE character_id = @cid;";
             {
                 var snapshot = repository.LoadSkills(conn, tx, characterId);
                 var grants = CharacterSkillProfile.GetGrowTypeGrants(job, first, second);
-                CharacterSkillProfile.MergeGrants(snapshot, grants, job, level);
+                CharacterSkillProfile.MergeGrants(snapshot, grants, job, level, first, second);
                 var points = SkillStateService.ResolvePointState(snapshot, job, level, bonusSp, bonusTp, first, second);
                 SkillStateService.ApplyProtocolMirrors(snapshot, points);
                 repository.SaveSkillProgress(conn, tx, characterId, snapshot, points);

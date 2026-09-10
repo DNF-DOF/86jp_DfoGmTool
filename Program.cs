@@ -10,10 +10,25 @@ namespace DfoGmTool
 {
     public static class Program
     {
-        public const string ToolVersion = "v260824";
+        public const string ToolVersion = "v260910";
 
         public static void Main(string[] args)
         {
+            if (Array.IndexOf(args, "--selftest-quest-items") >= 0)
+            {
+                Environment.Exit(SelfTests.QuestItemsSelfTest.Run(args));
+                return;
+            }
+            if (Array.IndexOf(args, "--selftest-character-progression") >= 0)
+            {
+                Environment.Exit(SelfTests.CharacterProgressionSelfTest.Run(args));
+                return;
+            }
+            if (Array.IndexOf(args, "--selftest-client-text-migration") >= 0)
+            {
+                Environment.Exit(SelfTests.ClientTextMigrationSelfTest.Run(args));
+                return;
+            }
             if (Array.IndexOf(args, "--selftest-database-compatibility") >= 0)
             {
                 Environment.Exit(
@@ -102,6 +117,8 @@ namespace DfoGmTool
                     migrationRequired = status.MigrationRequired,
                     migrationBlocked = status.MigrationBlocked,
                     databaseUnusable = status.DatabaseUnusable,
+                    encodingRequired = status.EncodingRequired,
+                    encodingPreview = status.EncodingPreview,
                     authenticationRequired = accessControl.RequiresAuthentication,
                     authenticated,
                     canChangeSource = !hostConfig.AllowRemoteAccess && authenticated,
@@ -196,6 +213,17 @@ namespace DfoGmTool
                     .Execute(body.UserBackedUp, body.ConfirmText));
             });
 
+            app.MapPost("/api/migrations/client-text/preview", (ClientTextMigrationRequest body) =>
+            {
+                if (hostConfig.AllowRemoteAccess) return Results.Json(new { success = false, error = "请在本机执行编码转换。" });
+                return Results.Json(ClientTextMigration.Preview(body.DatabasePath));
+            });
+            app.MapPost("/api/migrations/client-text/execute", (ClientTextMigrationRequest body) =>
+            {
+                if (hostConfig.AllowRemoteAccess) return Results.Json(new { success = false, error = "请在本机执行编码转换。" });
+                return Results.Json(runtime.ConvertClientText(body));
+            });
+
             app.MapGet("/api/accounts", () => WithRuntime((gm, _) => gm.ListAccounts()));
             app.MapGet("/api/accounts/{id:int}/detail", (int id) => WithRuntime((gm, pvfIndex) => gm.GetAccountDetail(id, pvfIndex)));
             app.MapPost("/api/accounts/{id:int}/backup", (int id) =>
@@ -225,6 +253,10 @@ namespace DfoGmTool
             app.MapPost("/api/accounts/{id:int}/cargo/max", (int id) =>
                 WithRuntime((gm, _) => gm.MaxAccountCargo(id)));
             app.MapGet("/api/characters", (int? accountId) => WithRuntime((gm, _) => gm.ListCharacters(accountId ?? -1)));
+            app.MapPost("/api/characters/{id:int}/rename", (int id, CharacterRenameRequest body) =>
+                WithRuntime((gm, _) => gm.RenameCharacter(id, body)));
+            app.MapPost("/api/characters/{id:int}/profession-ability", (int id, ProfessionAbilityRequest body) =>
+                WithRuntime((gm, _) => gm.SetProfessionAbility(id, body)));
             app.MapGet("/api/characters/{id:int}", (int id) => WithRuntime((gm, _) => gm.GetCharacter(id)));
             app.MapGet("/api/characters/{id:int}/items", (int id) => WithRuntime((gm, pvfIndex) => gm.ListItems(id, pvfIndex)));
             app.MapPost("/api/characters/{id:int}/mailbox/clear", (int id) =>
@@ -267,6 +299,9 @@ namespace DfoGmTool
                 WithRuntime((gm, _) => gm.AdjustCera(id, body.Amount, body.Type)));
             app.MapPost("/api/characters/{id:int}/level", (int id, LevelRequest body) =>
                 WithRuntime((gm, _) => gm.SetLevel(id, body.Level)));
+            app.MapGet("/api/characters/{id:int}/progression", (int id) => WithRuntime((gm, _) => gm.GetCharacterProgression(id)));
+            app.MapPost("/api/characters/{id:int}/profession", (int id, ProfessionRequest body) => WithRuntime((gm, _) => gm.SetCharacterProfession(id, body)));
+            app.MapPost("/api/characters/{id:int}/duel-progress", (int id, DuelProgressRequest body) => WithRuntime((gm, _) => gm.SetCharacterDuelProgress(id, body)));
             app.MapPost("/api/characters/{id:int}/inventory-limit/max", (int id) =>
                 WithRuntime((gm, _) => gm.SetInventoryLimitTo999(id)));
             app.MapPost("/api/characters/{id:int}/inventory-limit/restore", (int id) =>

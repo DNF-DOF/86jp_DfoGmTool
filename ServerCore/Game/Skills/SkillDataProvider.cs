@@ -29,19 +29,43 @@ namespace DfoGmTool.ServerCore.Game.Skills
         public int[] PreRequiredSkills;
         public int[] SpCostPerLevel;
         public int[] TpCostPerLevel;
+        public int[] MaximumLevels;
+        public int[] GrowtypeMaxLevels;
+        public int[] SecondGrowtypeMaxLevels;
         public bool IsFixedLevelSkill;
         public int FixedLevelBase;
         public int FixedLevelInterval = 1;
         public int FixedLevelAddPerInterval = 1;
 
-        public int GetFixedLevel(int charLevel)
+        public int GetFixedLevel(int charLevel, int growType = 0, int secondGrowType = 0)
         {
             if (!IsFixedLevelSkill) return 0;
             if (charLevel < RequiredLevel) return 0;
             var interval = FixedLevelInterval > 0 ? FixedLevelInterval : 1;
             var level = FixedLevelBase + (charLevel - RequiredLevel) / interval * FixedLevelAddPerInterval;
-            var maxLv = MaxLevel > 0 ? MaxLevel : int.MaxValue;
+            var maxLv = Math.Min(GetStaticMaximumLevelFor(growType), GetMaxLevelFor(growType, secondGrowType));
+            if (maxLv <= 0) return 0;
             return Math.Min(level, maxLv);
+        }
+
+        public int GetMaxLevelFor(int growType, int secondGrowType)
+        {
+            if (secondGrowType > 0 && SecondGrowtypeMaxLevels != null && SecondGrowtypeMaxLevels.Length > 0)
+            {
+                var index = growType * 2 + secondGrowType - 1;
+                var maximum = index >= 0 && index < SecondGrowtypeMaxLevels.Length ? SecondGrowtypeMaxLevels[index] : 0;
+                if (maximum > 0) return maximum;
+            }
+            if (GrowtypeMaxLevels != null && GrowtypeMaxLevels.Length > 0)
+                return growType >= 0 && growType < GrowtypeMaxLevels.Length ? Math.Max(0, GrowtypeMaxLevels[growType]) : 0;
+            return Math.Max(0, GetStaticMaximumLevelFor(growType));
+        }
+
+        private int GetStaticMaximumLevelFor(int growType)
+        {
+            if (MaximumLevels == null || MaximumLevels.Length == 0) return MaxLevel;
+            if (MaximumLevels.Length == 1) return MaximumLevels[0];
+            return growType >= 0 && growType < MaximumLevels.Length ? MaximumLevels[growType] : 0;
         }
 
         public int SpCostFor(int fromLevel, int toLevel)
@@ -249,6 +273,13 @@ namespace DfoGmTool.ServerCore.Game.Skills
                 PreRequiredSkills = ParseInts(skl.PreRequiredSkill),
                 SpCostPerLevel = ParseInts(skl.PurchaseCost),
                 TpCostPerLevel = ParseInts(skl.SpecialPurchaseCost),
+                MaximumLevels = ParseInts(skl.MaximumLevelValues),
+                GrowtypeMaxLevels = ParseInts(skl.GrowtypeMaximumLevel),
+                SecondGrowtypeMaxLevels = ParseInts(skl.SecondGrowtypeMaximumLevel),
+                IsFixedLevelSkill = skl.IsFixedLevelSkill,
+                FixedLevelBase = skl.FixedLevelBase,
+                FixedLevelInterval = skl.FixedLevelInterval,
+                FixedLevelAddPerInterval = skl.FixedLevelAddPerInterval,
             };
             return data;
         }

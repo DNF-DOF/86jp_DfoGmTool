@@ -57,6 +57,16 @@ namespace DfoGmTool.SelfTests
                 WaitForIndex(pvfIndex);
 
                 var gm = new GmService(config, pvfIndex);
+                var fixedSkill = new ServerCore.Game.Skills.SkillStaticData
+                {
+                    IsFixedLevelSkill = true, FixedLevelBase = 1, FixedLevelInterval = 1,
+                    RequiredLevel = 1, MaximumLevels = new[] { 1, 10, 20 },
+                    GrowtypeMaxLevels = new[] { 0, 8, 0 }, SecondGrowtypeMaxLevels = new[] { 0, 0, 9, 10 }
+                };
+                Check("fixed skill maximum follows grow type and awakening",
+                    fixedSkill.GetFixedLevel(90, 1, 0) == 8 && fixedSkill.GetFixedLevel(90, 1, 1) == 9
+                    && fixedSkill.GetFixedLevel(90, 2, 0) == 0 && fixedSkill.GetFixedLevel(90, 9, 0) == 0);
+                CheckClientTextCompatibility(gm, tempDb);
                 CheckPvfGrantClassifications(pvfIndex);
                 CheckLevelAndExperience(gm, tempDb);
                 CheckInventoryLimitOverride(gm, tempDb);
@@ -2146,6 +2156,81 @@ BEGIN SELECT RAISE(ABORT, 'gm audit failure'); END;");
             }
         }
 
+        private static void CheckClientTextCompatibility(GmService gm, string dbPath)
+        {
+            var baseline = (AccountBackupFile)gm.ExportAccountBackup(AccountId);
+            const string name = "中文角色名字";
+            var clone = gm.CloneCharacter(CharacterId, new CharacterCloneRequest
+            {
+                TargetAccountId = AccountId, NewName = name, Options = new List<string> { "basic" }
+            });
+            Check("GBK accepts six Chinese characters (12 bytes)", IsSuccess(clone), GetStringProperty(clone, "error"));
+            var id = GetIntProperty(clone, "characterId");
+            using (var connection = Open(dbPath))
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT name FROM characters WHERE character_id=@id";
+                command.Parameters.AddWithValue("@id", id);
+                Check("clone persists exact GBK bytes", command.ExecuteScalar() is byte[] bytes
+                    && bytes.SequenceEqual(ClientTextEncoding.GetBytes(name)));
+            }
+            Check("GBK duplicate name detected", !GetBoolProperty(gm.CheckCharacterNameAvailable(name), "available"));
+            Check("seven Chinese characters rejected", !GetBoolProperty(gm.CheckCharacterNameAvailable(name + "多"), "available"));
+            Check("twelve ASCII letters and digits accepted", GetBoolProperty(gm.CheckCharacterNameAvailable("Abc123Def456"), "available"));
+            Check("thirteen ASCII characters rejected", !GetBoolProperty(gm.CheckCharacterNameAvailable("Abc123Def4567"), "available"));
+            Check("mixed names use full-width byte budget", GetBoolProperty(gm.CheckCharacterNameAvailable("中文Abcd1234"), "available")
+                && !GetBoolProperty(gm.CheckCharacterNameAvailable("中文Abcd12345"), "available"));
+            Check("unrepresentable name rejected", !GetBoolProperty(gm.CheckCharacterNameAvailable("角色😀"), "available"));
+            Check("character API decodes GBK", System.Text.Json.JsonSerializer.Serialize(gm.ListCharacters(AccountId))
+                .Contains(System.Text.Json.JsonSerializer.Serialize(name).Trim('"'), StringComparison.Ordinal));
+
+            using (var connection = Open(dbPath))
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "INSERT INTO united_friend_relations(owner_name,friend_name) VALUES(@name,'好友中文');";
+                command.Parameters.AddWithValue("@name", name);
+                command.ExecuteNonQuery();
+            }
+            var current = (AccountBackupFile)gm.ExportAccountBackup(AccountId);
+            Check("backup includes owned Unicode friend relations", current.Tables.Any(t => t.Name == "united_friend_relations"));
+            Check("GBK backup round trip", IsSuccess(gm.RestoreAccountBackup(current)));
+            Check("friend names remain Unicode TEXT", LoadInt(dbPath,
+                "SELECT COUNT(*) FROM united_friend_relations WHERE owner_name='中文角色名字' AND friend_name='好友中文'") == 1);
+            current.ClientTextCodePage = 65001;
+            Check("wrong v4 encoding rejected", !IsSuccess(gm.RestoreAccountBackup(current)));
+            current.Version = 3;
+            current.ClientTextCodePage = null;
+            var dump = current.Tables.Single(t => t.Name == "characters");
+            foreach (var column in new[] { "name", "name_bytes" })
+            {
+                var index = dump.Columns.IndexOf(column);
+                if (index < 0) continue;
+                foreach (var row in dump.Rows)
+                    if (row[index].ToDbValue() is byte[] bytes)
+                        row[index] = AccountBackupValue.FromDbValue(System.Text.Encoding.UTF8.GetBytes(ClientTextEncoding.GetString(bytes)));
+            }
+            var originalJson = System.Text.Json.JsonSerializer.Serialize(current);
+            var restored = gm.RestoreAccountBackup(current);
+            Check("legacy v3 backup upgraded", IsSuccess(restored) && GetIntProperty(restored, "upgradedFromVersion") == 3);
+            Check("legacy restore does not mutate input", System.Text.Json.JsonSerializer.Serialize(current) == originalJson);
+            Check("legacy restore retry is safe", IsSuccess(gm.RestoreAccountBackup(current)));
+            Check("restored legacy name uses GBK", !GetBoolProperty(gm.CheckCharacterNameAvailable(name), "available"));
+            var nameIndex = dump.Columns.IndexOf("name");
+            dump.Rows[0][nameIndex] = AccountBackupValue.FromDbValue(System.Text.Encoding.UTF8.GetBytes("不能转换😀"));
+            Check("unrepresentable legacy backup rejected before replacing account", !IsSuccess(gm.RestoreAccountBackup(current))
+                && !GetBoolProperty(gm.CheckCharacterNameAvailable(name), "available"));
+
+            var petBytes = System.Text.Encoding.UTF8.GetBytes("宠物名字");
+            Check("legacy creature bytes convert", ((byte[])LegacyClientText.ConvertName(petBytes))
+                .SequenceEqual(ClientTextEncoding.GetBytes("宠物名字")));
+            var detail = "{\"Creature\":{\"NameBytes\":\"" + Convert.ToBase64String(petBytes) + "\",\"Level\":7}}";
+            var converted = System.Text.Json.Nodes.JsonNode.Parse(LegacyClientText.ConvertMailboxDetail(detail));
+            Check("legacy mailbox creature name converts and preserves detail",
+                converted["Creature"]["NameBytes"].GetValue<string>() == Convert.ToBase64String(ClientTextEncoding.GetBytes("宠物名字"))
+                && converted["Creature"]["Level"].GetValue<int>() == 7);
+            Check("encoding tests restore original account", IsSuccess(gm.RestoreAccountBackup(baseline)));
+        }
+
         private static void CheckCloneOption(GmService gm, string dbPath, string option, string cloneName, Func<int, bool> assertion)
         {
             var clonedId = CloneForOption(gm, cloneName, option);
@@ -2483,7 +2568,7 @@ VALUES(824246,824245,0,910000,'stackable',7);");
             if (characterDump == null)
                 return;
 
-            Check("current account backup uses version 3", exported.Version == 3);
+            Check("current account backup uses version 4 with GBK marker", exported.Version == 4 && exported.ClientTextCodePage == 936);
             Check("account backup captures A21 account lottery progress",
                 exported.Tables.Any(t => t.Name.Equals("account_increase_chance_lottery_progress", StringComparison.OrdinalIgnoreCase)));
             Check("account backup captures mailbox relation graph",
@@ -2535,7 +2620,7 @@ VALUES(824246,824245,0,910000,'stackable',7);");
                 LoadInt(dbPath, "SELECT COUNT(1) FROM characters WHERE account_id=926014") == 2);
 
             var currentBackup = gm.ExportAccountBackup(AccountId) as AccountBackupFile;
-            Check("re-export current account backup uses version 3", currentBackup != null && currentBackup.Version == 3);
+            Check("re-export current account backup uses version 4", currentBackup != null && currentBackup.Version == 4);
             if (currentBackup == null)
                 return;
             exported = currentBackup;
@@ -2573,9 +2658,9 @@ WHERE audit_id=824245;");
             }
 
             var restored = gm.RestoreAccountBackup(exported);
-            Check("RestoreAccountBackup accepts current A21 v3 backup", IsSuccess(restored));
-            Check("account restore reports v3 without legacy upgrade",
-                GetIntProperty(restored, "sourceBackupVersion") == 3
+            Check("RestoreAccountBackup accepts current A21 v4 backup", IsSuccess(restored));
+            Check("account restore reports v4 without legacy upgrade",
+                GetIntProperty(restored, "sourceBackupVersion") == 4
                 && GetIntProperty(restored, "upgradedFromVersion") == 0);
             Check("account restore remaps conflicting avatar logical UIDs",
                 GetIntProperty(restored, "remappedAvatarUidCount") > 0
@@ -2595,8 +2680,9 @@ FROM (
     GROUP BY slot_index
     HAVING COUNT(1) > 1
 );") == 0);
-            Check("A21 account restore preserves source slots",
-                LoadInt(dbPath, "SELECT COUNT(1) FROM characters WHERE account_id=926014 AND character_id IN (926014, 926016) AND slot_index IN (0, 8)") == 2);
+            Check("A21 account restore compresses slot holes in source order",
+                LoadInt(dbPath, "SELECT slot_index FROM characters WHERE character_id=926014") == 0
+                && LoadInt(dbPath, "SELECT slot_index FROM characters WHERE character_id=926016") == 1);
             Check("A21 account restore preserves activation IDs",
                 LoadInt(dbPath, @"SELECT COUNT(1) FROM character_active_quests
 WHERE character_id=926014 AND quest_id=42420 AND activation_id='clone-active-quest'") == 1
@@ -2720,6 +2806,8 @@ WHERE character_id=926014;");
                 LoadInt(dbPath, "SELECT seed_character_id FROM get_userinfo_template WHERE id=1") == 926015);
             Check("same account survivor remains active",
                 LoadInt(dbPath, "SELECT COUNT(1) FROM characters WHERE character_id=926015 AND delete_flag=0") == 1);
+            Check("delete leaves continuous character selection slots",
+                LoadInt(dbPath, "SELECT COUNT(*) FROM (SELECT slot_index, ROW_NUMBER() OVER (ORDER BY slot_index, character_id)-1 AS expected FROM characters WHERE account_id=926014 AND delete_flag=0) WHERE slot_index<>expected") == 0);
             Check("delete removes avatar detail rows",
                 LoadInt(dbPath, "SELECT COUNT(1) FROM character_avatar_detail WHERE character_id=926014 OR owner_id=926014") == 0);
             Check("delete removes inventory audit rows",

@@ -29,7 +29,7 @@ namespace DfoGmTool.SelfTests
                 var currentHash = Hash(currentPath);
                 var current = DatabaseCompatibilityGuard.Validate(currentPath);
                 Check(
-                    "真实 A21 schema v8 接受并报告 baseline",
+                    "真实 A21 schema v26 接受并报告 baseline",
                     current.SchemaVersion == A12ToA21MigrationService.TargetSchemaVersion
                     && current.MetadataSchemaVersion == A12ToA21MigrationService.TargetSchemaVersion
                     && current.BaselineId == "86jp-database-v1"
@@ -37,7 +37,7 @@ namespace DfoGmTool.SelfTests
                     ref failures);
                 Check("guard 不修改真实 A21 数据库", currentHash.SequenceEqual(Hash(currentPath)), ref failures);
 
-                foreach (var version in new[] { 0, 52, 999 })
+                foreach (var version in new[] { 11, 26, 52, 999 })
                 {
                     var path = Path.Combine(root, "version-" + version + ".db");
                     CreateVersionedDatabase(path, schema, version);
@@ -51,6 +51,24 @@ namespace DfoGmTool.SelfTests
                         && beforeHash.SequenceEqual(Hash(path)),
                         ref failures);
                 }
+
+                foreach (var version in new[] { 0, 8, 10 })
+                {
+                    var legacyPath = Path.Combine(root, "legacy-" + version + ".db");
+                    CreateVersionedDatabase(legacyPath, schema, version);
+                    var before = Hash(legacyPath);
+                    Check($"同结构 schema v{version} 接受且不修改数据库",
+                        DatabaseCompatibilityGuard.Validate(legacyPath).SchemaVersion == version
+                        && before.SequenceEqual(Hash(legacyPath)), ref failures);
+                }
+                var mismatchedPath = Path.Combine(root, "mismatched.db");
+                CreateVersionedDatabase(mismatchedPath, schema, 26);
+                Execute(mismatchedPath, "UPDATE schema_metadata SET schema_version=8;");
+                Check("同结构版本元数据不一致仍接受", DatabaseCompatibilityGuard.Validate(mismatchedPath).StructureCompatible, ref failures);
+                Execute(mismatchedPath, "UPDATE schema_metadata SET baseline_id='custom-baseline';");
+                Check("同结构自定义 baseline 仍接受", DatabaseCompatibilityGuard.Validate(mismatchedPath).StructureCompatible, ref failures);
+                Execute(mismatchedPath, "DROP TABLE schema_metadata;");
+                Check("同结构缺少版本元数据仍接受", DatabaseCompatibilityGuard.Validate(mismatchedPath).StructureCompatible, ref failures);
 
                 var missingTablePath = Path.Combine(root, "missing-table.db");
                 CreateVersionedDatabase(missingTablePath, schema, 5);
@@ -167,7 +185,7 @@ VALUES(1,1,0,9,zeroblob(82));");
 INSERT OR REPLACE INTO schema_metadata
     (singleton_id, baseline_id, schema_version, created_at, updated_at)
 VALUES
-    (1, '86jp-database-v1', " + A12ToA21MigrationService.TargetSchemaVersion + @", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);";
+    (1, '86jp-database-v1', " + version + @", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);";
                 command.ExecuteNonQuery();
             }
         }

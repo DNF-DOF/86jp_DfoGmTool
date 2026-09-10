@@ -4,6 +4,8 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
+using System.Text.Json;
+using DfoGmTool.ServerCore.Infrastructure;
 using DfoGmTool.ServerCore.Game.Inventory;
 using Microsoft.Data.Sqlite;
 
@@ -11,7 +13,7 @@ namespace DfoGmTool.Services
 {
     public sealed partial class GmService
     {
-        private const int AccountBackupVersion = 3;
+        private const int AccountBackupVersion = 4;
 
         private static readonly Regex AccountBackupIdentifier = new Regex(
             @"\A[A-Za-z_][A-Za-z0-9_]*\z",
@@ -93,6 +95,7 @@ namespace DfoGmTool.Services
                 "character_item_values",
                 "character_item_states",
                 "character_daily_challenge_progress_events",
+                "character_experience_bonus_effects",
             };
 
         private static readonly HashSet<string> AccountBackupIgnoredRuntimeTables =
@@ -142,6 +145,7 @@ namespace DfoGmTool.Services
                     return new AccountBackupFile
                     {
                         Version = AccountBackupVersion,
+                        ClientTextCodePage = ClientTextEncoding.CodePage,
                         ExportedAt = DateTimeOffset.Now.ToString("O", CultureInfo.InvariantCulture),
                         AccountID = accountId,
                         CharacterIDs = characterIds,
@@ -157,6 +161,18 @@ namespace DfoGmTool.Services
             if (validation != null)
                 return Error(validation);
             var sourceBackupVersion = file.Version;
+            // Restore normalizes slots and IDs too. Work on a private copy so a failed
+            // attempt can be retried without transcoding or remapping the input twice.
+            file = JsonSerializer.Deserialize<AccountBackupFile>(JsonSerializer.Serialize(file));
+            if (sourceBackupVersion == 3)
+            {
+                try { UpgradeLegacyBackupText(file); }
+                catch (Exception ex) when (ex is FormatException || ex is JsonException
+                    || ex is InvalidOperationException || ex is ArgumentException)
+                {
+                    return Error("旧备份编码转换失败: " + ex.Message);
+                }
+            }
 
             using (var conn = new SqliteConnection(_config.ConnectionString))
             {
@@ -246,7 +262,7 @@ namespace DfoGmTool.Services
                         RemappedAvatarUidCount = remappedAvatarUidCount,
                         RemappedCreatureUidCount = remappedCreatureUidCount,
                         SourceBackupVersion = sourceBackupVersion,
-                        UpgradedFromVersion = 0,
+                        UpgradedFromVersion = sourceBackupVersion == 3 ? 3 : 0,
                         RemappedMailboxMessageIdCount = remappedMailboxMessageIdCount,
                         RemappedMailboxAuditIdCount = remappedMailboxAuditIdCount,
                     };
@@ -258,8 +274,12 @@ namespace DfoGmTool.Services
         {
             if (file == null)
                 return "备份文件为空";
-            if (file.Version != AccountBackupVersion)
-                return "不支持的备份文件版本: " + file.Version + "；当前仅接受 A21 备份 v3";
+            if (file.Version != AccountBackupVersion && file.Version != 3)
+                return "不支持的备份文件版本: " + file.Version + "；当前接受 A21 备份 v3/v4";
+            if (file.Version == 4 && file.ClientTextCodePage != ClientTextEncoding.CodePage)
+                return "备份 v4 必须声明 clientTextCodePage=936";
+            if (file.Version == 3 && file.ClientTextCodePage.HasValue)
+                return "旧备份 v3 不支持编码标记，请使用 v4";
             if (file.AccountID <= 0)
                 return "备份文件中的账号 ID 无效";
             if (file.CharacterIDs == null)
@@ -269,6 +289,30 @@ namespace DfoGmTool.Services
             if (file.Tables.GroupBy(t => t.Name, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
                 return "备份文件存在重复表";
             return null;
+        }
+
+        private static void UpgradeLegacyBackupText(AccountBackupFile file)
+        {
+            foreach (var table in file.Tables)
+            {
+                var columns = table.Name.Equals("characters", StringComparison.OrdinalIgnoreCase) ? new[] { "name", "name_bytes" }
+                    : table.Name.Equals("character_creatures", StringComparison.OrdinalIgnoreCase) ? new[] { "creature_text" }
+                    : table.Name.Equals("mailbox_attachments", StringComparison.OrdinalIgnoreCase) ? new[] { "detail_json" } : Array.Empty<string>();
+                foreach (var column in columns)
+                {
+                    var index = table.Columns.FindIndex(c => c.Equals(column, StringComparison.OrdinalIgnoreCase));
+                    if (index < 0) continue;
+                    foreach (var row in table.Rows)
+                    {
+                        if (row.Count != table.Columns.Count)
+                            throw new InvalidOperationException("备份行列数不一致");
+                        var value = row[index].ToDbValue();
+                        row[index] = AccountBackupValue.FromDbValue(column == "detail_json"
+                            ? LegacyClientText.ConvertMailboxDetail(value as string)
+                            : LegacyClientText.ConvertName(value));
+                    }
+                }
+            }
         }
 
         private static void NormalizeAccountBackupDumpForTargetSchema(AccountBackupTableDump dump, AccountBackupTableInfo targetTable)
@@ -366,13 +410,13 @@ namespace DfoGmTool.Services
                 activeRows.Add((row, row[characterIdIndex].ToInt64(), row[slotIndex].ToInt64()));
             }
 
-            var seen = new HashSet<long>();
-            var needsRebuild = activeRows.Any(entry => entry.Slot < 0 || !seen.Add(entry.Slot));
+            var orderedRows = activeRows.OrderBy(entry => entry.Slot).ThenBy(entry => entry.CharacterId).ToList();
+            var needsRebuild = orderedRows.Where((entry, index) => entry.Slot != index).Any();
             if (!needsRebuild)
                 return;
 
             var nextSlot = 0L;
-            foreach (var entry in activeRows.OrderBy(e => e.CharacterId))
+            foreach (var entry in orderedRows)
             {
                 entry.Row[slotIndex] = new AccountBackupValue { Type = "integer", Integer = nextSlot };
                 nextSlot++;
@@ -566,6 +610,14 @@ namespace DfoGmTool.Services
                 clauses.Add(BuildInClause("name", characterNames, parameters, "@characterName"));
             }
 
+            if (table.Name.Equals("united_friend_relations", StringComparison.OrdinalIgnoreCase)
+                && characterNames.Count > 0)
+            {
+                var names = characterNames.Select(value => value is byte[] bytes
+                    ? (object)ClientTextEncoding.GetString(bytes) : value).ToList();
+                clauses.Add(BuildInClause("owner_name", names, parameters, "@friendOwner"));
+            }
+
             if (clauses.Count == 0)
                 return null;
 
@@ -692,6 +744,7 @@ namespace DfoGmTool.Services
 
         private static void ClearAccountBackupData(SqliteConnection conn, SqliteTransaction tx, int accountId, List<int> existingCharacterIds)
         {
+            var characterNames = LoadAccountCharacterNameValues(conn, tx, accountId, includeDeleted: true);
             var tables = LoadAccountBackupTableInfos(conn, tx)
                 .Where(t => !t.Name.Equals("accounts", StringComparison.OrdinalIgnoreCase)
                     && !t.Name.Equals("characters", StringComparison.OrdinalIgnoreCase))
@@ -701,7 +754,9 @@ namespace DfoGmTool.Services
 
             foreach (var table in tables)
             {
-                var predicate = BuildAccountBackupDeletePredicate(table, accountId, existingCharacterIds);
+                var predicate = table.Name.Equals("united_friend_relations", StringComparison.OrdinalIgnoreCase)
+                    ? BuildAccountBackupPredicate(table, accountId, existingCharacterIds, characterNames)
+                    : BuildAccountBackupDeletePredicate(table, accountId, existingCharacterIds);
                 if (predicate == null)
                     continue;
 
@@ -1224,6 +1279,9 @@ namespace DfoGmTool.Services
 
     public sealed class AccountBackupFile
     {
+        [JsonPropertyName("clientTextCodePage")]
+        public int? ClientTextCodePage { get; set; }
+
         [JsonPropertyName("version")]
         public int Version { get; set; }
 

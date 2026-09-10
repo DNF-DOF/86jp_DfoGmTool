@@ -17,6 +17,22 @@ namespace DfoGmTool.Services
         private bool _migrationRequired;
         private bool _migrationBlocked;
         private bool _databaseUnusable;
+        private ClientTextPreview _encodingPreview;
+        private GmConfig _encodingConfig;
+
+        public object ConvertClientText(ClientTextMigrationRequest request)
+        {
+            _gate.EnterWriteLock();
+            try
+            {
+                // Release the GM source before touching data; all normal operations share this gate.
+                _active = null;
+                _startupError = "编码转换后请重新加载数据库。";
+                SqliteConnection.ClearAllPools();
+                return ClientTextMigration.Execute(request);
+            }
+            finally { _gate.ExitWriteLock(); }
+        }
 
         public GmRuntimeEnvironment(GmConfig initialConfig)
         {
@@ -78,6 +94,8 @@ namespace DfoGmTool.Services
                     _migrationRequired = false;
                     _migrationBlocked = false;
                     _databaseUnusable = false;
+                    _encodingPreview = null;
+                    _encodingConfig = null;
                     DatabaseCompatibilityReport databaseCompatibility;
                     try
                     {
@@ -91,6 +109,17 @@ namespace DfoGmTool.Services
                         throw new InvalidOperationException(
                             "数据库校验失败: " + databaseError.GetBaseException().Message,
                             databaseError);
+                    }
+
+                    var encodingPreview = ClientTextMigration.Preview(config.DatabasePath);
+                    if (encodingPreview.Required)
+                    {
+                        _encodingPreview = encodingPreview;
+                        _encodingConfig = config;
+                        ReleaseRejectedSource(false, false, false,
+                            "检测到旧 UTF-8 或待确认的名字节；请先预览并处理 UTF-8 → GBK 编码，再加载数据库。");
+                        SqliteConnection.ClearAllPools();
+                        return new { success = true, encodingRequired = true, encodingPreview, status = BuildStatus() };
                     }
 
                     try
@@ -267,8 +296,8 @@ namespace DfoGmTool.Services
                 Configured = config != null,
                 Ready = ready,
                 Loading = config != null && !ready && string.IsNullOrWhiteSpace(indexError),
-                Database = includeSourceDetails ? config?.DatabasePath : null,
-                Pvf = includeSourceDetails ? config?.PvfPath : null,
+                Database = includeSourceDetails ? (config ?? _encodingConfig)?.DatabasePath : null,
+                Pvf = includeSourceDetails ? (config ?? _encodingConfig)?.PvfPath : null,
                 ServerBin = includeSourceDetails ? config?.ServerBinDir : null,
                 IndexReady = index?.IsReady ?? false,
                 IndexError = includeSourceDetails ? indexError : null,
@@ -281,6 +310,8 @@ namespace DfoGmTool.Services
                 MigrationRequired = _migrationRequired,
                 MigrationBlocked = _migrationBlocked,
                 DatabaseUnusable = _databaseUnusable,
+                EncodingRequired = _encodingPreview?.Required == true,
+                EncodingPreview = includeSourceDetails ? _encodingPreview : null,
             };
         }
 
@@ -329,5 +360,7 @@ namespace DfoGmTool.Services
         public bool MigrationRequired { get; set; }
         public bool MigrationBlocked { get; set; }
         public bool DatabaseUnusable { get; set; }
+        public bool EncodingRequired { get; set; }
+        public ClientTextPreview EncodingPreview { get; set; }
     }
 }

@@ -13,6 +13,143 @@ async function setLevel() {
   }
 }
 
+let characterProgression = null;
+let progressionBusy = false;
+function progressionControls(disabled) {
+  for (const id of ['profession-type', 'profession-level', 'btn-profession-save',
+    'duel-grade', 'btn-duel-save', 'profession-machine-level', 'btn-profession-machine-save']) $("#" + id).disabled = disabled;
+}
+async function loadCharacterProgression() {
+  characterProgression = null;
+  progressionControls(true);
+  $('#profession-machine').classList.add('hidden');
+  $('#profession-state').textContent = '正在读取副职业…';
+  $('#duel-state').textContent = '';
+  if (!currentChar) return;
+  const id = currentChar.characterId, epoch = selectEpoch;
+  try {
+    const data = await api(`/api/characters/${id}/progression`);
+    if (epoch !== selectEpoch || currentChar?.characterId !== id) return;
+    characterProgression = data;
+    progressionControls(progressionBusy);
+    const p = data.profession;
+    const types = $('#profession-type'); types.replaceChildren(new Option('无副职业', '0'));
+    if (p) {
+      for (const option of p.options) types.add(new Option(option.name, option.type));
+      types.value = String(p.type);
+      renderProfessionLevels(p.level);
+      $('#profession-state').textContent = `当前：${p.options.find(x => x.type === p.type)?.name || '无副职业'} · Lv.${p.level}`;
+    } else {
+      $('#profession-state').textContent = data.professionError || '当前数据源不支持副职业编辑';
+      for (const name of ['profession-type', 'profession-level', 'btn-profession-save']) $('#' + name).disabled = true;
+    }
+    renderProfessionMachine();
+    const grades = $('#duel-grade');
+    grades.replaceChildren();
+    for (const option of data.duel.gradeOptions || []) grades.add(new Option(option.name, option.grade));
+    if (!data.duel.gradeName) {
+      const unknown = new Option('当前等级未收录，请选择等级', '');
+      unknown.disabled = true;
+      grades.add(unknown);
+    }
+    grades.value = data.duel.gradeName ? String(data.duel.grade) : '';
+    grades.disabled = progressionBusy || !data.duel.gradeOptions?.length;
+    $('#btn-duel-save').disabled = grades.disabled;
+    $('#duel-state').textContent = data.duel.error || `当前：${data.duel.gradeName || '未收录等级'}`;
+  } catch (error) {
+    if (epoch !== selectEpoch) return;
+    $('#profession-state').textContent = error.message;
+    $('#duel-state').textContent = error.message;
+  }
+}
+function renderProfessionLevels(level = 1) {
+  const type = Number($('#profession-type').value);
+  const option = characterProgression?.profession?.options.find(x => x.type === type);
+  const levels = $('#profession-level'); levels.replaceChildren();
+  for (const row of option?.levels || [{ level: 0, experience: 0 }]) levels.add(new Option(`Lv.${row.level}`, row.level));
+  levels.value = String(Math.min(option?.maxLevel || 0, level));
+  levels.disabled = progressionBusy || !option;
+}
+$('#profession-type').onchange = () => { renderProfessionLevels(); renderProfessionMachine(); };
+
+function renderProfessionMachine() {
+  const data = characterProgression;
+  const visible = data?.profession?.type === 3 && Number($('#profession-type').value) === 3;
+  $('#profession-machine').classList.toggle('hidden', !visible);
+  const select = $('#profession-machine-level');
+  select.replaceChildren();
+  const machine = data?.abilities;
+  if (!visible) return;
+  for (const level of machine?.levels || []) select.add(new Option(`Lv.${level}`, level));
+  if (machine && !machine.levels.includes(machine.level)) {
+    const current = new Option(`当前 Lv.${machine.level}（请选择可用等级）`, '');
+    current.disabled = true; select.add(current);
+  }
+  select.value = machine?.levels.includes(machine.level) ? String(machine.level) : '';
+  select.disabled = progressionBusy || !machine?.levels.length;
+  $('#btn-profession-machine-save').disabled = select.disabled;
+  $('#profession-machine-state').textContent = data?.abilityError || (machine
+    ? `当前分解机 Lv.${machine.level} · 耐久 ${machine.endurance}` : '分解机数据暂不可用');
+}
+
+async function saveProfessionMachine() {
+  const machine = characterProgression?.abilities;
+  if (!currentChar || progressionBusy || machine?.type !== 3 || Number($('#profession-type').value) !== 3) return;
+  const level = Number($('#profession-machine-level').value);
+  if (!machine.levels.includes(level)) return toast('请选择可用的分解机等级', true);
+  const id = currentChar.characterId, epoch = selectEpoch;
+  if (!confirmCharacterSwitchedAway(currentChar, '修改分解机等级')) return;
+  progressionBusy = true; progressionControls(true);
+  try {
+    await post(`/api/characters/${id}/profession-ability`, {
+      level, expectedType: 3, expectedState: machine.state, characterOffline: true,
+    });
+    toast(`分解机已设置为 Lv.${level}，请重新选择角色`);
+  } catch (error) { toast(error.message, true); }
+  finally {
+    progressionBusy = false;
+    await loadCharacterProgression();
+  }
+}
+$('#btn-profession-machine-save').onclick = saveProfessionMachine;
+async function saveCharacterProgression(kind) {
+  if (!currentChar || !characterProgression || progressionBusy) return;
+  const id = currentChar.characterId, epoch = selectEpoch;
+  function integer(selector, maximum) {
+    const raw = $(selector).value.trim(), value = Number(raw);
+    if (!raw || !Number.isSafeInteger(value) || value < 0 || value > maximum) throw new Error('请输入范围内的整数');
+    return value;
+  }
+  try {
+    let body, endpoint;
+    if (kind === 'profession') {
+      body = { type: Number($('#profession-type').value), level: Number($('#profession-level').value),
+        expectedType: characterProgression.profession.type,
+        expectedExperience: characterProgression.profession.experience };
+      endpoint = 'profession';
+    } else {
+      endpoint = 'duel-progress';
+      const grade = integer('#duel-grade', 255);
+      if (!characterProgression.duel.gradeOptions?.some(x => x.grade === grade)) throw new Error('请选择决斗等级');
+      body = { grade };
+    }
+    if (!confirmCharacterSwitchedAway(currentChar, '修改副职业或决斗属性')) return;
+    body.characterOffline = true;
+    progressionBusy = true; progressionControls(true);
+    const result = await post(`/api/characters/${id}/${endpoint}`, body);
+    toast(kind === 'profession' ? '副职业已保存；重新登录后生效' : '已保存，重新登录后生效');
+    if (epoch === selectEpoch && currentChar?.characterId === id) {
+      if (kind === 'profession') { loadQuests(); loadAllVisibleQuests(); loadClearedQuests(); loadSpTp(); }
+    }
+  } catch (error) { toast(error.message, true); }
+  finally {
+    progressionBusy = false;
+    await loadCharacterProgression();
+  }
+}
+$('#btn-profession-save').onclick = () => saveCharacterProgression('profession');
+$('#btn-duel-save').onclick = () => saveCharacterProgression('duel');
+
 async function maxPersonalCargo() {
   if (!currentChar) return;
   try {
@@ -157,7 +294,7 @@ async function openCharacterClonePanel() {
   if (!confirmCharacterSwitchedAway(currentChar, '复制')) return;
   $('#character-clone-panel').classList.remove('hidden');
   $('#clone-character-state').textContent = '正在加载复制设置...';
-  $('#clone-character-name').value = `${currentChar.name}_copy`;
+  $('#clone-character-name').value = '';
   cloneNameAvailable = false;
   $('#clone-name-state').textContent = '';
   try {
@@ -276,6 +413,8 @@ function updateCloneAccountLimit() {
 async function checkCloneCharacterName() {
   cloneNameAvailable = false;
   const name = $('#clone-character-name').value.trim();
+  const nameError = validateCharacterNameInput(name);
+  if (nameError) { $('#clone-name-state').textContent = nameError; toast(nameError, true); return; }
   $('#clone-name-state').textContent = '正在检查...';
   try {
     const result = await api(`/api/characters/name-available?name=${encodeURIComponent(name)}`);
@@ -295,6 +434,8 @@ async function runCharacterClone() {
 
   const targetAccountId = parseInt($('#clone-target-account').value, 10);
   const newName = $('#clone-character-name').value.trim();
+  const nameError = validateCharacterNameInput(newName);
+  if (nameError) return toast(nameError, true);
   const options = [...document.querySelectorAll('#clone-option-list input[type="checkbox"]:checked')]
     .map((input) => input.value);
   if (!confirm(`复制角色 ${currentChar.name} 到账号 #${targetAccountId}，新角色名 ${newName}？`))

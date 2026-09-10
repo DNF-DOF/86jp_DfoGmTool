@@ -49,9 +49,9 @@ namespace DfoGmTool.ServerCore.Network
             _buffer.AddRange(new byte[count]);
         }
 
-        public void WriteUtf8Dstr(string value)
+        public void WriteClientDstr(string value)
         {
-            var bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+            var bytes = Infrastructure.ClientTextEncoding.GetBytes(value);
             WriteInt32(bytes.Length);
             WriteBytes(bytes);
         }

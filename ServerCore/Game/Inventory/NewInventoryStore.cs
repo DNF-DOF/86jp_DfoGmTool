@@ -164,6 +164,17 @@ WHERE character_id=@owner AND list_type=@list AND slot_index=@slot LIMIT 1;";
 
         public ItemGrantResult TryGrant(int characterId, int accountId, int job, int itemTemplateId, int requestedCount, ItemGrantOptions options)
         {
+            using var connection = OpenConnection();
+            using var transaction = connection.BeginTransaction();
+            var result = TryGrant(connection, transaction, characterId, accountId, job, itemTemplateId, requestedCount, options);
+            if (result.Success) transaction.Commit();
+            return result;
+        }
+
+        // Caller owns rollback on failure, including partial stack merges.
+        internal ItemGrantResult TryGrant(SqliteConnection connection, SqliteTransaction transaction,
+            int characterId, int accountId, int job, int itemTemplateId, int requestedCount, ItemGrantOptions options)
+        {
             var result = new ItemGrantResult
             {
                 ItemTemplateId = itemTemplateId,
@@ -180,8 +191,6 @@ WHERE character_id=@owner AND list_type=@list AND slot_index=@slot LIMIT 1;";
                 return Fail(result, kindError);
 
             result.ListType = listType;
-            using var connection = OpenConnection();
-            using var transaction = connection.BeginTransaction();
             if (!TryGetCharacterOpenRange(
                     connection, transaction, characterId, itemKind,
                     out listType, out start, out end, out var rangeError))
@@ -253,7 +262,6 @@ WHERE character_id=@owner AND list_type=@list AND slot_index=@slot LIMIT 1;";
                 AddAffected(result, (short)slot, perSlot);
             }
 
-            transaction.Commit();
             result.Success = true;
             result.GrantedCount = requestedCount;
             result.ExpireTime = expireTime;
@@ -356,7 +364,8 @@ WHERE character_id=@cid AND list_type=0 AND slot_index IN (0,1,2);";
             ItemCore before = null;
             if (TryLoadItem(connection, transaction, characterId, accountId, InventoryListType.Main, slotIndex, out var record))
                 before = record.Core.Copy();
-            var core = new ItemCore { ItemKind = ItemCore.KindSpecialMaterial, ItemId = slotIndex, Count = value };
+            var core = before?.Copy() ?? new ItemCore { ItemKind = ItemCore.KindSpecialMaterial, ItemId = slotIndex };
+            core.Count = value;
             UpsertCharacterCore(connection, transaction, characterId, InventoryListType.Main, slotIndex, core);
             WriteAudit(connection, transaction, "gm_virtual_count_set", characterId, accountId, InventoryListType.Main, slotIndex, before, core, 0);
             transaction.Commit();

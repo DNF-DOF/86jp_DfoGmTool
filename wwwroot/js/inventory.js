@@ -148,27 +148,31 @@ function updateClearButton() {
   btn.textContent = `清空「${activeCategory}」(${deletable}件)`;
 }
 
-// 货币行(金币/复活币/技能点)行内覆写
-const WALLET_TYPES = { 0: 'gold', 1: 'revive', 2: 'sp' };
+// 货币行(金币/复活币/胜点)行内覆写
+const WALLET_TYPES = { 0: 'gold', 1: 'revive', 2: 'winPoints' };
 
 function renderWalletRows(tbody, items) {
+  const character = currentChar;
+  const epoch = selectEpoch;
   for (const item of items) {
     const type = WALLET_TYPES[item.slot];
-    const goldLimit = type === 'gold' && goldLimitStatus ? goldLimitStatus.goldCarryLimit : null;
+    const goldLimit = type === 'winPoints' ? 999999 : type === 'gold' && goldLimitStatus ? goldLimitStatus.goldCarryLimit : null;
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${item.slot}</td><td>${esc(item.name)}</td>
+    tr.innerHTML = `<td>${item.slot}</td><td>${esc(({0:'金币',1:'复活币',2:'胜点'})[item.slot] || item.name)}</td>
       <td>${(item.count ?? 0).toLocaleString()}</td>
       <td><input type="number" min="0"${goldLimit ? ` max="${goldLimit}"` : ''} class="val-input" value="${item.count ?? 0}"></td>
       <td>${type ? '<button class="mini">覆写</button>' : ''}</td>`;
     const btn = tr.querySelector('button');
     if (btn) btn.onclick = async () => {
-      const value = parseInt(tr.querySelector('input').value, 10);
-      if (isNaN(value) || value < 0) return toast('请输入非负整数', true);
+      const raw = tr.querySelector('input').value.trim();
+      const value = Number(raw);
+      if (!raw || !Number.isSafeInteger(value) || value < 0) return toast('请输入非负整数', true);
+      if (type === 'winPoints' && value > 999999) return toast('胜点最多可设置为 999999', true);
+      if (epoch !== selectEpoch || currentChar?.characterId !== character?.characterId) return;
       try {
-        const result = await post(`/api/characters/${currentChar.characterId}/wallet`, { type, value });
+        const result = await post(`/api/characters/${character.characterId}/wallet`, { type, value });
         toast(type === 'gold' ? `金币已覆写为 ${Number(result.value).toLocaleString()}` : '已覆写');
-        loadItems();
-        refreshHeader();
+        if (epoch === selectEpoch) { loadItems(); refreshHeader(); }
       } catch (e) {
         toast(e.message, true);
       }
